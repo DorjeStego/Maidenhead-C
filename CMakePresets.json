@@ -1,0 +1,21 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "clion-debug",
+      "displayName": "CLion Debug",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/cmake-build-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "clion-debug",
+      "configurePreset": "clion-debug",
+      "targets": ["_native"]
+    }
+  ]
+}

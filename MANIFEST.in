@@ -1,0 +1,3 @@
+include CMakeLists.txt
+include CMakePresets.json
+recursive-include src/maidenhead/_native *.c *.h *.cpp
