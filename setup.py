@@ -25,15 +25,15 @@ define_macros = []
 extra_compile_args = []
 language = None
 
-geo_root = os.environ.get("GEOGRAPHICLIB_DIR")
-if geo_root:
-    include_dirs.append(os.path.join(geo_root, "include"))
-    library_dirs.append(os.path.join(geo_root, "lib"))
-
 simdjson_root = os.environ.get("SIMDJSON_DIR")
 if simdjson_root:
     include_dirs.append(os.path.join(simdjson_root, "include"))
     library_dirs.append(os.path.join(simdjson_root, "lib"))
+
+sleef_root = os.environ.get("SLEEF_DIR")
+if sleef_root:
+    include_dirs.append(os.path.join(sleef_root, "include"))
+    library_dirs.append(os.path.join(sleef_root, "lib"))
 
 conda_prefix = os.environ.get("CONDA_PREFIX")
 if conda_prefix:
@@ -43,19 +43,6 @@ if conda_prefix:
 # Fallback to the active Python prefix for build-isolation cases.
 include_dirs.append(os.path.join(sys.prefix, "include"))
 library_dirs.append(os.path.join(sys.prefix, "lib"))
-
-lib_geo = find_library("GeographicLib")
-geo_header = None
-for inc in include_dirs:
-    candidate = os.path.join(inc, "GeographicLib", "Geodesic.hpp")
-    if os.path.exists(candidate):
-        geo_header = candidate
-        break
-if lib_geo and geo_header:
-    native_sources.append("src/maidenhead/_native/geo_geodesic.cpp")
-    libraries.append("GeographicLib")
-    define_macros.append(("MH_HAVE_GEODESIC", "1"))
-    language = "c++"
 
 lib_simdjson = find_library("simdjson")
 simdjson_header = None
@@ -70,6 +57,19 @@ if simdjson_available:
     libraries.append("simdjson")
     define_macros.append(("MH_HAVE_SIMDJSON", "1"))
     language = "c++"
+
+lib_sleef = find_library("sleef")
+sleef_header = None
+for inc in include_dirs + ["/usr/include", "/usr/local/include"]:
+    candidate = os.path.join(inc, "sleef.h")
+    if os.path.exists(candidate):
+        sleef_header = candidate
+        break
+sleef_available = bool(lib_sleef and sleef_header)
+if sleef_available:
+    libraries.append("sleef")
+    define_macros.append(("MH_HAVE_SIMD_MATH", "1"))
+    # SLEEF is a SIMD math backend; the geodesic SIMD hooks remain opt-in at runtime.
 
 if language == "c++" and os.name != "nt":
     # Avoid passing C++ flags to C sources; rely on compiler default for C++.
@@ -135,6 +135,8 @@ class build_ext(_build_ext):
         python_bin = preferred_python if os.path.exists(preferred_python) else sys.executable
         env = os.environ.copy()
         env["PYTHON_BIN"] = python_bin
+        if sleef_available:
+            env.setdefault("WITH_SLEEF_SIMD", "1")
         subprocess.check_call([script], env=env, cwd=ROOT)
 
         # Stage the CMake-built extension into the build output directory.

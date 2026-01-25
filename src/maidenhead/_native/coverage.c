@@ -235,21 +235,35 @@ mh_status mh_cover_line(
     }
     size_t count = 0;
 
+    mh_point *geo_points = NULL;
+    if (method == MH_LINE_GEODESIC) {
+        const size_t npts = (size_t)steps + 1;
+        double *fractions = (double *)malloc(npts * sizeof(double));
+        geo_points = (mh_point *)malloc(npts * sizeof(mh_point));
+        if (!fractions || !geo_points) {
+            free(fractions);
+            free(geo_points);
+            mh_free_list(&(mh_list){items, count});
+            mh_set_error(err, MH_ERR_INTERNAL, "allocation failed");
+            return MH_ERR_INTERNAL;
+        }
+        for (size_t i = 0; i < npts; i++) {
+            fractions[i] = (double)i / (double)steps;
+        }
+        mh_status st_geo = mh_geodesic_line_points_many(a, b, fractions, npts, geo_points, err);
+        free(fractions);
+        if (st_geo != MH_OK) {
+            free(geo_points);
+            mh_free_list(&(mh_list){items, count});
+            return st_geo;
+        }
+    }
+
     for (int i = 0; i <= steps; i++) {
         double frac = (double)i / (double)steps;
         mh_point pt;
         if (method == MH_LINE_GEODESIC) {
-#ifdef MH_HAVE_GEODESIC
-            mh_status st_geo = mh_geodesic_line_point(a, b, frac, &pt, err);
-            if (st_geo != MH_OK) {
-                mh_free_list(&(mh_list){items, count});
-                return st_geo;
-            }
-#else
-            mh_set_error(err, MH_ERR_MISSING_DEP, "native geodesic line requires GeographicLib");
-            mh_free_list(&(mh_list){items, count});
-            return MH_ERR_MISSING_DEP;
-#endif
+            pt = geo_points[(size_t)i];
         } else {
             mh_point a_rad = *a;
             mh_point b_rad = *b;
@@ -315,6 +329,7 @@ mh_status mh_cover_line(
         items[count++] = copy;
     }
 
+    free(geo_points);
     out->items = items;
     out->length = count;
     return MH_OK;
