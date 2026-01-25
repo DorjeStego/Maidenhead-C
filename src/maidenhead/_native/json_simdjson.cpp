@@ -8,6 +8,7 @@
 
 #include "errors.h"
 
+#ifndef MH_HAVE_SIMDJSON
 static PyObject *mh_missing_dep_error(const char *message) {
     PyObject *mod = PyImport_ImportModule("maidenhead.errors");
     if (!mod) {
@@ -24,6 +25,7 @@ static PyObject *mh_missing_dep_error(const char *message) {
     Py_DECREF(exc);
     return NULL;
 }
+#endif
 
 #ifdef MH_HAVE_SIMDJSON
 static PyObject *mh_simdjson_to_py(const simdjson::dom::element &el);
@@ -112,7 +114,7 @@ static PyObject *mh_simdjson_to_py(const simdjson::dom::element &el) {
 }
 #endif
 
-extern "C" PyObject *py_mh_json_loads(PyObject *self, PyObject *args) {
+extern "C" PyObject *py_mh_json_loads_simdjson(PyObject *self, PyObject *args) {
     PyObject *obj = NULL;
     if (!PyArg_ParseTuple(args, "O", &obj)) {
         return NULL;
@@ -141,23 +143,7 @@ extern "C" PyObject *py_mh_json_loads(PyObject *self, PyObject *args) {
     return mh_simdjson_to_py(element);
 #else
     (void)self;
-    PyObject *json_mod = PyImport_ImportModule("json");
-    if (!json_mod) {
-        return mh_missing_dep_error("native json parsing requires simdjson");
-    }
-    PyObject *loads = PyObject_GetAttrString(json_mod, "loads");
-    Py_DECREF(json_mod);
-    if (!loads) {
-        return mh_missing_dep_error("native json parsing requires simdjson");
-    }
-    PyObject *call_args = PyTuple_Pack(1, obj);
-    if (!call_args) {
-        Py_DECREF(loads);
-        return NULL;
-    }
-    PyObject *result = PyObject_CallObject(loads, call_args);
-    Py_DECREF(call_args);
-    Py_DECREF(loads);
-    return result;
+    (void)obj;
+    return mh_missing_dep_error("native json parsing requires simdjson");
 #endif
 }

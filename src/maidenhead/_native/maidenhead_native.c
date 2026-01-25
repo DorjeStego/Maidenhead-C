@@ -20,7 +20,24 @@ static int mh_parse_locator_sequence(PyObject *obj, const char ***out_vals, Py_s
 static int mh_parse_bbox_sequence(PyObject *obj, mh_bbox **out_bboxes, Py_ssize_t *out_len);
 static int mh_parse_point(PyObject *obj, mh_point *out);
 
-PyObject *py_mh_json_loads(PyObject *self, PyObject *args);
+#ifdef MH_HAVE_SIMDJSON
+PyObject *py_mh_json_loads_simdjson(PyObject *self, PyObject *args);
+#endif
+
+static PyObject *py_mh_json_loads(PyObject *self, PyObject *args) {
+#ifdef MH_HAVE_SIMDJSON
+    return py_mh_json_loads_simdjson(self, args);
+#else
+    (void)self;
+    (void)args;
+    if (mh_exc_missing_dep) {
+        PyErr_SetString(mh_exc_missing_dep, "simdjson not available");
+    } else {
+        PyErr_SetString(PyExc_ImportError, "simdjson not available");
+    }
+    return NULL;
+#endif
+}
 
 static PyObject *mh_list_to_pylist(const mh_list *list);
 static PyObject *mh_kv_list_to_pydict(const mh_kv_list *list);

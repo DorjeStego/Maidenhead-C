@@ -1,10 +1,12 @@
 import os
+import sys
 import shutil
 import subprocess
 from ctypes.util import find_library
 
 from setuptools import Extension, setup
 from setuptools.command.build_py import build_py as _build_py
+from setuptools.command.build_ext import build_ext as _build_ext
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
 
@@ -33,6 +35,15 @@ if simdjson_root:
     include_dirs.append(os.path.join(simdjson_root, "include"))
     library_dirs.append(os.path.join(simdjson_root, "lib"))
 
+conda_prefix = os.environ.get("CONDA_PREFIX")
+if conda_prefix:
+    include_dirs.append(os.path.join(conda_prefix, "include"))
+    library_dirs.append(os.path.join(conda_prefix, "lib"))
+
+# Fallback to the active Python prefix for build-isolation cases.
+include_dirs.append(os.path.join(sys.prefix, "include"))
+library_dirs.append(os.path.join(sys.prefix, "lib"))
+
 lib_geo = find_library("GeographicLib")
 geo_header = None
 for inc in include_dirs:
@@ -48,19 +59,21 @@ if lib_geo and geo_header:
 
 lib_simdjson = find_library("simdjson")
 simdjson_header = None
-for inc in include_dirs:
+for inc in include_dirs + ["/usr/include", "/usr/local/include"]:
     candidate = os.path.join(inc, "simdjson.h")
     if os.path.exists(candidate):
         simdjson_header = candidate
         break
-if lib_simdjson and simdjson_header:
+simdjson_available = bool(lib_simdjson and simdjson_header)
+if simdjson_available:
     native_sources.append("src/maidenhead/_native/json_simdjson.cpp")
     libraries.append("simdjson")
     define_macros.append(("MH_HAVE_SIMDJSON", "1"))
     language = "c++"
 
 if language == "c++" and os.name != "nt":
-    extra_compile_args.append("-std=c++11")
+    # Avoid passing C++ flags to C sources; rely on compiler default for C++.
+    pass
 
 ext_modules = [
     Extension(
@@ -106,5 +119,13 @@ class build_py(_build_py):
         if os.name != "nt":
             os.chmod(dest_bin, 0o755)
 
+class build_ext(_build_ext):
+    def run(self):
+        if not simdjson_available:
+            raise RuntimeError(
+                "simdjson is required to build the native extension; "
+                "install system simdjson dev packages or set SIMDJSON_DIR"
+            )
+        super().run()
 
-setup(ext_modules=ext_modules, cmdclass={"build_py": build_py})
+setup(ext_modules=ext_modules, cmdclass={"build_py": build_py, "build_ext": build_ext})
