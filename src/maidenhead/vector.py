@@ -5,6 +5,7 @@ This module is retained to avoid import breakages. It currently forwards to
 bulk helpers and returns native list outputs (no pandas/numpy adapters).
 """
 
+from . import _native as _native_mh  # type: ignore
 from . import bulk as _bulk
 
 
@@ -54,11 +55,33 @@ intersects_polygon_many = _bulk.intersects_polygon_many
 initial_bearing_many = _bulk.initial_bearing_many
 to_wkt_many = _bulk.to_wkt_many
 to_utm_zone_many = _bulk.to_utm_zone_many
-to_geojson_polygon_many = _bulk.to_geojson_polygon_many
-to_geojson_feature_many = _bulk.to_geojson_feature_many
-to_geojson_features_many = _bulk.to_geojson_feature_many
-to_geojson_bbox_many = _bulk.to_geojson_bbox_many
-to_geojson_envelope_many = _bulk.to_geojson_envelope_many
+def _json_many(items):
+    return [_native_mh.json_loads(payload) for payload in items]
+
+
+def to_geojson_polygon_many(locators, *, return_type: str = "auto"):
+    _unsupported_return_type(return_type)
+    return _json_many(_bulk.to_geojson_polygon_many(locators))
+
+
+def to_geojson_feature_many(locators, *, return_type: str = "auto"):
+    _unsupported_return_type(return_type)
+    return _json_many(_bulk.to_geojson_feature_many(locators))
+
+
+def to_geojson_features_many(locators, *, return_type: str = "auto"):
+    _unsupported_return_type(return_type)
+    return _json_many(_bulk.to_geojson_feature_many(locators))
+
+
+def to_geojson_bbox_many(locators, *, return_type: str = "auto"):
+    _unsupported_return_type(return_type)
+    return [list(bbox) for bbox in _bulk.to_geojson_bbox_many(locators)]
+
+
+def to_geojson_envelope_many(locators, *, return_type: str = "auto"):
+    _unsupported_return_type(return_type)
+    return _json_many(_bulk.to_geojson_envelope_many(locators))
 
 __all__ = [
     "from_latlon_many",

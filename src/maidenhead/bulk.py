@@ -23,7 +23,9 @@ def from_latlon_many(
 ) -> list[str]:
     if resolution_deg is not None:
         raise ValueError("resolution_deg is not supported in native-only mode")
-    return _native_mh.from_latlon_many(list(lats), list(lons), precision=precision, clamp=clamp)
+    if not clamp:
+        raise ValueError("clamp=False is not supported in native-only mode")
+    return _native_mh.from_latlon_many(list(lats), list(lons), precision=precision)
 
 
 # direct native aliases
