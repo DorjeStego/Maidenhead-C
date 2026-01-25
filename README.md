@@ -477,3 +477,34 @@ Batch input options:
 - `2`: invalid input / usage error
 
 ———
+
+## Bulk CLI
+
+The native CLI provides bulk subcommands for batch processing via stdin or file input.
+
+Usage:
+
+- `mh bulk <operation> --stdin`
+- `mh bulk <operation> --file <path>`
+
+Input formats:
+
+- Locators: one per line
+- Lat/lon: `lat lon` or `lat,lon` (comma+space accepted)
+- Mixed formats follow the specific operation requirements
+
+Supported operations:
+
+normalize, from-latlon, center, bbox, wkt, contains-point, contains,
+intersects-bbox, intersects-polygon, azimuth, initial-bearing, neighbors,
+adjacent, corners, precision, parent, children, size, area, diagonal, utm,
+geojson, bbox-split, bbox-split-list
+
+Examples:
+
+- `mh bulk normalize --stdin`
+- `mh bulk from-latlon --file coords.txt --format json`
+- `mh bulk center --stdin --format csv`
+- `mh bulk bbox --stdin --format json`
+- `mh bulk size --stdin --unit km --format csv`
+- `mh bulk geojson --stdin --geojson-format featurecollection --format json`
