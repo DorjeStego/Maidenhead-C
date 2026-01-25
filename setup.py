@@ -130,6 +130,24 @@ class build_ext(_build_ext):
                 "simdjson is required to build the native extension; "
                 "install system simdjson dev packages or set SIMDJSON_DIR"
             )
-        super().run()
+        script = os.path.join(ROOT, "scripts", "build_native_ext.sh")
+        preferred_python = "/home/dorje/miniforge3/envs/WSPR/bin/python"
+        python_bin = preferred_python if os.path.exists(preferred_python) else sys.executable
+        env = os.environ.copy()
+        env["PYTHON_BIN"] = python_bin
+        subprocess.check_call([script], env=env, cwd=ROOT)
+
+        # Stage the CMake-built extension into the build output directory.
+        import sysconfig
+
+        ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ""
+        if not ext_suffix:
+            raise RuntimeError("Could not determine Python extension suffix for build")
+        src_so = os.path.join(ROOT, "src", "maidenhead", f"_native{ext_suffix}")
+        if not os.path.exists(src_so):
+            raise RuntimeError(f"Native extension not found at {src_so}")
+        dest_dir = os.path.join(self.build_lib, "maidenhead")
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copy2(src_so, os.path.join(dest_dir, os.path.basename(src_so)))
 
 setup(ext_modules=ext_modules, cmdclass={"build_py": build_py, "build_ext": build_ext})
