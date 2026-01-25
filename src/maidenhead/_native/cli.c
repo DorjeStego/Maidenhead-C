@@ -492,6 +492,35 @@ static int mh_cli_geojson_feature_collection(
     return 2;
 }
 
+static char *mh_cli_geojson_feature_collection_alloc(
+    const char *const *locators,
+    size_t count,
+    FILE *err
+) {
+    size_t cap = 512 + count * 512;
+    for (int attempt = 0; attempt < 4; attempt++) {
+        char *buf = (char *)malloc(cap);
+        if (!buf) {
+            mh_cli_print_error(err, "allocation failed");
+            return NULL;
+        }
+        mh_error_context ctx = {MH_OK, NULL, NULL, NULL};
+        mh_status st = mh_to_geojson_feature_collection(locators, count, buf, cap, &ctx);
+        if (st == MH_OK) {
+            return buf;
+        }
+        free(buf);
+        if (ctx.code == MH_ERR_INTERNAL && ctx.message && strcmp(ctx.message, "output buffer too small") == 0) {
+            cap *= 2;
+            continue;
+        }
+        mh_cli_print_mh_error(err, &ctx);
+        return NULL;
+    }
+    mh_cli_print_error(err, "output buffer too small");
+    return NULL;
+}
+
 static void mh_cli_print_geojson_polygon(FILE *out, mh_bbox bbox) {
     fprintf(
         out,
@@ -523,6 +552,79 @@ static void mh_cli_print_json_float(FILE *out, double value) {
     fprintf(out, "%.17g", value);
 }
 
+static void mh_cli_json_bulk_start(FILE *out, const mh_cli_lines *lines) {
+    (void)lines;
+    fputc('[', out);
+}
+
+static void mh_cli_json_bulk_end(FILE *out) {
+    fputc(']', out);
+}
+
+static void mh_cli_json_single_start_string(FILE *out, const char *input) {
+    fputs("{\"input\":", out);
+    mh_cli_print_json_string(out, input);
+    fputs(",\"output\":", out);
+}
+
+static void mh_cli_json_single_start_strings(FILE *out, const char **items, size_t count) {
+    fputs("{\"input\":[", out);
+    for (size_t i = 0; i < count; i++) {
+        if (i > 0) {
+            fputc(',', out);
+        }
+        mh_cli_print_json_string(out, items[i]);
+    }
+    fputs("],\"output\":", out);
+}
+
+static void mh_cli_json_single_end(FILE *out) {
+    fputs("}\n", out);
+}
+
+static void mh_cli_json_obj_start_input_string(FILE *out, const char *input) {
+    fputs("{\"input\":", out);
+    mh_cli_print_json_string(out, input);
+    fputs(",\"output\":", out);
+}
+
+static void mh_cli_json_obj_start_input_array(FILE *out, const char **items, size_t count) {
+    fputs("{\"input\":[", out);
+    for (size_t i = 0; i < count; i++) {
+        if (i > 0) {
+            fputc(',', out);
+        }
+        mh_cli_print_json_string(out, items[i]);
+    }
+    fputs("],\"output\":", out);
+}
+
+static void mh_cli_json_obj_end(FILE *out) {
+    fputc('}', out);
+}
+
+static void mh_cli_json_print_latlon(FILE *out, double lat, double lon) {
+    fputc('[', out);
+    mh_cli_print_json_float(out, lat);
+    fputc(',', out);
+    mh_cli_print_json_float(out, lon);
+    fputc(']', out);
+}
+
+static void mh_cli_json_print_point_input(
+    FILE *out,
+    const char *token,
+    int is_locator,
+    double lat,
+    double lon
+) {
+    if (is_locator) {
+        mh_cli_print_json_string(out, token);
+    } else {
+        mh_cli_json_print_latlon(out, lat, lon);
+    }
+}
+
 static void mh_cli_print_error(FILE *err, const char *message) {
     fprintf(err, "error: %s\n", message);
 }
@@ -532,6 +634,15 @@ static int mh_cli_print_mh_error(FILE *err, const mh_error_context *ctx) {
         mh_cli_print_error(err, ctx->message);
     } else {
         mh_cli_print_error(err, "operation failed");
+    }
+    return 2;
+}
+
+static int mh_cli_print_mh_error_line(FILE *err, const mh_error_context *ctx, size_t line_no) {
+    if (ctx && ctx->message) {
+        fprintf(err, "error: %s at line %zu\n", ctx->message, line_no);
+    } else {
+        fprintf(err, "error: operation failed at line %zu\n", line_no);
     }
     return 2;
 }
@@ -631,9 +742,10 @@ static int mh_cli_handle_normalize(int argc, char **argv, FILE *out, FILE *err) 
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -650,7 +762,13 @@ static int mh_cli_handle_normalize(int argc, char **argv, FILE *out, FILE *err) 
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    fprintf(out, "%s\n", norm);
+    if (strcmp(format, "json") == 0) {
+        mh_cli_json_single_start_string(out, locator);
+        mh_cli_print_json_string(out, norm);
+        mh_cli_json_single_end(out);
+    } else {
+        fprintf(out, "%s\n", norm);
+    }
     mh_cli_lines_free(&lines);
     return 0;
 }
@@ -729,7 +847,7 @@ static int mh_cli_handle_center(int argc, char **argv, FILE *out, FILE *err) {
     const char *sep = csv ? "," : " ";
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             double lat = 0.0;
@@ -750,9 +868,10 @@ static int mh_cli_handle_center(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -770,7 +889,15 @@ static int mh_cli_handle_center(int argc, char **argv, FILE *out, FILE *err) {
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    fprintf(out, "%.*f%s%.*f\n", digits, lat, sep, digits, lon);
+    if (strcmp(format, "json") == 0) {
+        mh_cli_json_single_start_string(out, locator);
+        fputc('[', out);
+        fprintf(out, "%.*f,%.*f", digits, lat, digits, lon);
+        fputc(']', out);
+        mh_cli_json_single_end(out);
+    } else {
+        fprintf(out, "%.*f%s%.*f\n", digits, lat, sep, digits, lon);
+    }
     mh_cli_lines_free(&lines);
     return 0;
 }
@@ -817,9 +944,8 @@ static int mh_cli_handle_bbox(int argc, char **argv, FILE *out, FILE *err) {
     const char *sep = csv ? "," : " ";
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
-        int first = 1;
         for (size_t i = 0; i < lines.length; i++) {
             mh_bbox bbox;
             mh_error_context ctx = {MH_OK, NULL, NULL, NULL};
@@ -845,12 +971,16 @@ static int mh_cli_handle_bbox(int argc, char **argv, FILE *out, FILE *err) {
                 parts_len = 1;
             }
 
-            for (size_t p = 0; p < parts_len; p++) {
-                if (strcmp(format, "json") == 0) {
-                    if (!first) {
+            if (strcmp(format, "json") == 0) {
+                if (i > 0) {
+                    fputc(',', out);
+                }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
+                fputc('[', out);
+                for (size_t p = 0; p < parts_len; p++) {
+                    if (p > 0) {
                         fputc(',', out);
                     }
-                    first = 0;
                     fprintf(
                         out,
                         "[%.*f,%.*f,%.*f,%.*f]",
@@ -863,7 +993,11 @@ static int mh_cli_handle_bbox(int argc, char **argv, FILE *out, FILE *err) {
                         digits,
                         parts[p].max_lon
                     );
-                } else {
+                }
+                fputc(']', out);
+                mh_cli_json_obj_end(out);
+            } else {
+                for (size_t p = 0; p < parts_len; p++) {
                     char buf[128];
                     mh_cli_format_bbox(buf, sizeof(buf), &parts[p], digits, sep);
                     fprintf(out, "%s\n", buf);
@@ -871,7 +1005,8 @@ static int mh_cli_handle_bbox(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
             fputc('\n', out);
         }
         mh_cli_lines_free(&lines);
@@ -891,6 +1026,10 @@ static int mh_cli_handle_bbox(int argc, char **argv, FILE *out, FILE *err) {
         return mh_cli_print_mh_error(err, &ctx);
     }
 
+    if (strcmp(format, "json") == 0) {
+        mh_cli_json_single_start_string(out, locator);
+    }
+
     if (split) {
         mh_bbox parts[2];
         size_t parts_len = 0;
@@ -903,16 +1042,57 @@ static int mh_cli_handle_bbox(int argc, char **argv, FILE *out, FILE *err) {
             parts[0] = bbox;
             parts_len = 1;
         }
-        for (size_t p = 0; p < parts_len; p++) {
-            char buf[128];
-            mh_cli_format_bbox(buf, sizeof(buf), &parts[p], digits, sep);
-            fprintf(out, "%s%s", buf, p + 1 < parts_len ? "\n" : "");
+        if (strcmp(format, "json") == 0) {
+            fputc('[', out);
+            for (size_t p = 0; p < parts_len; p++) {
+                if (p > 0) {
+                    fputc(',', out);
+                }
+                fprintf(
+                    out,
+                    "[%.*f,%.*f,%.*f,%.*f]",
+                    digits,
+                    parts[p].min_lat,
+                    digits,
+                    parts[p].min_lon,
+                    digits,
+                    parts[p].max_lat,
+                    digits,
+                    parts[p].max_lon
+                );
+            }
+            fputc(']', out);
+        } else {
+            for (size_t p = 0; p < parts_len; p++) {
+                char buf[128];
+                mh_cli_format_bbox(buf, sizeof(buf), &parts[p], digits, sep);
+                fprintf(out, "%s%s", buf, p + 1 < parts_len ? "\n" : "");
+            }
+            fprintf(out, "\n");
         }
-        fprintf(out, "\n");
     } else {
-        char buf[128];
-        mh_cli_format_bbox(buf, sizeof(buf), &bbox, digits, sep);
-        fprintf(out, "%s\n", buf);
+        if (strcmp(format, "json") == 0) {
+            fprintf(
+                out,
+                "[%.*f,%.*f,%.*f,%.*f]",
+                digits,
+                bbox.min_lat,
+                digits,
+                bbox.min_lon,
+                digits,
+                bbox.max_lat,
+                digits,
+                bbox.max_lon
+            );
+        } else {
+            char buf[128];
+            mh_cli_format_bbox(buf, sizeof(buf), &bbox, digits, sep);
+            fprintf(out, "%s\n", buf);
+        }
+    }
+
+    if (strcmp(format, "json") == 0) {
+        mh_cli_json_single_end(out);
     }
 
     mh_cli_lines_free(&lines);
@@ -1187,7 +1367,7 @@ static int mh_cli_handle_wkt(int argc, char **argv, FILE *out, FILE *err) {
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_bbox bbox;
@@ -1238,9 +1418,10 @@ static int mh_cli_handle_wkt(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -1276,8 +1457,25 @@ static int mh_cli_handle_wkt(int argc, char **argv, FILE *out, FILE *err) {
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    mh_cli_print_wkt_polygon(out, &bbox);
-    fputc('\n', out);
+    if (strcmp(format, "json") == 0) {
+        mh_cli_json_single_start_string(out, locator);
+        char buf[256];
+        snprintf(
+            buf,
+            sizeof(buf),
+            "POLYGON((%.17g %.17g, %.17g %.17g, %.17g %.17g, %.17g %.17g, %.17g %.17g))",
+            bbox.min_lon, bbox.min_lat,
+            bbox.max_lon, bbox.min_lat,
+            bbox.max_lon, bbox.max_lat,
+            bbox.min_lon, bbox.max_lat,
+            bbox.min_lon, bbox.min_lat
+        );
+        mh_cli_print_json_string(out, buf);
+        mh_cli_json_single_end(out);
+    } else {
+        mh_cli_print_wkt_polygon(out, &bbox);
+        fputc('\n', out);
+    }
     mh_cli_lines_free(&lines);
     return 0;
 }
@@ -1395,7 +1593,7 @@ static int mh_cli_handle_bbox_split_list(int argc, char **argv, FILE *out, FILE 
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -1429,6 +1627,9 @@ static int mh_cli_handle_bbox_split_list(int argc, char **argv, FILE *out, FILE 
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                fprintf(out, "%.17g,%.17g,%.17g,%.17g", bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon);
+                fputs("],\"output\":", out);
                 fputc('[', out);
                 for (size_t p = 0; p < parts_len; p++) {
                     if (p > 0) {
@@ -1437,6 +1638,7 @@ static int mh_cli_handle_bbox_split_list(int argc, char **argv, FILE *out, FILE 
                     mh_cli_print_bbox_json(out, &parts[p]);
                 }
                 fputc(']', out);
+                fputc('}', out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 for (size_t p = 0; p < parts_len; p++) {
@@ -1449,9 +1651,10 @@ static int mh_cli_handle_bbox_split_list(int argc, char **argv, FILE *out, FILE 
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -1472,6 +1675,9 @@ static int mh_cli_handle_bbox_split_list(int argc, char **argv, FILE *out, FILE 
         return mh_cli_print_mh_error(err, &ctx);
     }
     if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":[", out);
+        fprintf(out, "%.17g,%.17g,%.17g,%.17g", min_lat, min_lon, max_lat, max_lon);
+        fputs("],\"output\":", out);
         fputc('[', out);
         for (size_t p = 0; p < parts_len; p++) {
             if (p > 0) {
@@ -1480,7 +1686,7 @@ static int mh_cli_handle_bbox_split_list(int argc, char **argv, FILE *out, FILE 
             mh_cli_print_bbox_json(out, &parts[p]);
         }
         fputc(']', out);
-        fputc('\n', out);
+        fputs("}\n", out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -1595,7 +1801,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "normalize") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             char norm[12];
@@ -1603,19 +1809,21 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_normalize_locator(lines.items[i], norm, sizeof(norm), &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 mh_cli_print_json_string(out, norm);
+                mh_cli_json_obj_end(out);
             } else {
                 fprintf(out, "%s%s", norm, i + 1 < lines.length ? "\n" : "");
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -1654,13 +1862,17 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":", out);
+                mh_cli_json_print_latlon(out, lat, lon);
+                fputs(",\"output\":", out);
                 mh_cli_print_json_string(out, grid.locator);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%s%s", grid.locator, i + 1 < lines.length ? "," : "");
             } else {
@@ -1670,15 +1882,17 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
         }
         if (strcmp(format, "json") == 0) {
             fputc(']', out);
+            fputc('\n', out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
 
     if (strcmp(op, "center") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             double lat = 0.0;
@@ -1687,17 +1901,19 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_to_center_latlon(lines.items[i], &lat, &lon, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fputc('[', out);
                 mh_cli_print_json_float(out, lat);
                 fputc(',', out);
                 mh_cli_print_json_float(out, lon);
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 char buf[128];
@@ -1706,7 +1922,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -1715,7 +1931,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "bbox") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_bbox bbox;
@@ -1723,13 +1939,15 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_to_bbox(lines.items[i], &bbox, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 mh_cli_print_bbox_json(out, &bbox);
+                mh_cli_json_obj_end(out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 char buf[128];
@@ -1738,7 +1956,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -1748,7 +1966,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
     if (strcmp(op, "wkt") == 0) {
         int out_precision = precision >= 0 ? precision : 6;
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_bbox bbox;
@@ -1766,7 +1984,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 st = mh_from_latlon(lat, lon, out_precision, 1, &grid, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 st = mh_to_bbox(grid.locator, &bbox, &ctx);
             } else {
@@ -1774,7 +1992,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 char buf[256];
@@ -1791,14 +2009,16 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 mh_cli_print_json_string(out, buf);
+                mh_cli_json_obj_end(out);
             } else {
                 mh_cli_print_wkt_polygon(out, &bbox);
                 fprintf(out, "%s", i + 1 < lines.length ? "\n" : "");
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -1807,7 +2027,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "contains-point") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -1836,13 +2056,19 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                mh_cli_print_json_string(out, tokens.items[0]);
+                fputc(',', out);
+                mh_cli_json_print_latlon(out, lat, lon);
+                fputs("],\"output\":", out);
                 fputs(hit ? "true" : "false", out);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%s%s", hit ? "true" : "false", i + 1 < lines.length ? "," : "");
             } else {
@@ -1851,7 +2077,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -1860,7 +2086,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "contains") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -1881,13 +2107,16 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                const char *inputs[] = {tokens.items[0], tokens.items[1]};
+                mh_cli_json_obj_start_input_array(out, inputs, 2);
                 fputs(hit ? "true" : "false", out);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%s%s", hit ? "true" : "false", i + 1 < lines.length ? "," : "");
             } else {
@@ -1896,7 +2125,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -1905,7 +2134,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "intersects-bbox") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -1932,13 +2161,19 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                mh_cli_print_json_string(out, tokens.items[0]);
+                fputc(',', out);
+                fprintf(out, "%.17g,%.17g,%.17g,%.17g", bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon);
+                fputs("],\"output\":", out);
                 fputs(hit ? "true" : "false", out);
+                fputc('}', out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%s%s", hit ? "true" : "false", i + 1 < lines.length ? "," : "");
             } else {
@@ -1947,7 +2182,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -1956,7 +2191,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "intersects-polygon") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -1999,13 +2234,21 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                mh_cli_print_json_string(out, tokens.items[0]);
+                for (size_t p = 0; p < poly_len; p++) {
+                    fputc(',', out);
+                    mh_cli_json_print_latlon(out, points[p].lat, points[p].lon);
+                }
+                fputs("],\"output\":", out);
                 fputs(hit ? "true" : "false", out);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%s%s", hit ? "true" : "false", i + 1 < lines.length ? "," : "");
             } else {
@@ -2014,7 +2257,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2023,7 +2266,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "azimuth") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -2055,7 +2298,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (mh_to_center_latlon(tokens.items[0], &a.lat, &a.lon, &ctx) != MH_OK) {
                     mh_cli_tokens_free(&tokens);
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
             }
             if (strchr(tokens.items[1], ',')) {
@@ -2070,7 +2313,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (mh_to_center_latlon(tokens.items[1], &b.lat, &b.lon, &ctx) != MH_OK) {
                     mh_cli_tokens_free(&tokens);
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
             }
             double bearing = 0.0;
@@ -2079,13 +2322,13 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             st = mh_distance_km(&a, &b, MH_DISTANCE_HAVERSINE, &dist, &ctx);
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (range_mode && a_is_loc && b_is_loc) {
                 mh_corners_t corners_a;
@@ -2094,13 +2337,13 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (st != MH_OK) {
                     mh_cli_tokens_free(&tokens);
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 st = mh_corners(tokens.items[1], &corners_b, &ctx);
                 if (st != MH_OK) {
                     mh_cli_tokens_free(&tokens);
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 mh_point a_pts[4] = {corners_a.nw, corners_a.ne, corners_a.sw, corners_a.se};
                 mh_point b_pts[4] = {corners_b.nw, corners_b.ne, corners_b.sw, corners_b.se};
@@ -2114,7 +2357,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                         if (st != MH_OK) {
                             mh_cli_tokens_free(&tokens);
                             mh_cli_lines_free(&lines);
-                            return mh_cli_print_mh_error(err, &ctx);
+                            return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                         }
                         if (first) {
                             min_km = d;
@@ -2130,18 +2373,24 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                         }
                     }
                 }
-                if (strcmp(format, "json") == 0) {
-                    if (i > 0) {
-                        fputc(',', out);
-                    }
-                    fputc('[', out);
-                    fprintf(out, "%.*f", digits, bearing);
+            if (strcmp(format, "json") == 0) {
+                if (i > 0) {
                     fputc(',', out);
-                    fprintf(out, "%.*f", digits, min_km);
-                    fputc(',', out);
-                    fprintf(out, "%.*f", digits, max_km);
-                    fputc(']', out);
-                } else {
+                }
+                fputs("{\"input\":[", out);
+                mh_cli_json_print_point_input(out, tokens.items[0], a_is_loc, a.lat, a.lon);
+                fputc(',', out);
+                mh_cli_json_print_point_input(out, tokens.items[1], b_is_loc, b.lat, b.lon);
+                fputs("],\"output\":", out);
+                fputc('[', out);
+                fprintf(out, "%.*f", digits, bearing);
+                fputc(',', out);
+                fprintf(out, "%.*f", digits, min_km);
+                fputc(',', out);
+                fprintf(out, "%.*f", digits, max_km);
+                fputc(']', out);
+                mh_cli_json_obj_end(out);
+            } else {
                     const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                     fprintf(out, "%.*f%s%.*f%s%.*f%s", digits, bearing, sep, digits, min_km, sep, digits, max_km, i + 1 < lines.length ? "\n" : "");
                 }
@@ -2150,11 +2399,17 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     if (i > 0) {
                         fputc(',', out);
                     }
+                    fputs("{\"input\":[", out);
+                    mh_cli_json_print_point_input(out, tokens.items[0], a_is_loc, a.lat, a.lon);
+                    fputc(',', out);
+                    mh_cli_json_print_point_input(out, tokens.items[1], b_is_loc, b.lat, b.lon);
+                    fputs("],\"output\":", out);
                     fputc('[', out);
                     fprintf(out, "%.*f", digits, bearing);
                     fputc(',', out);
                     fprintf(out, "%.*f", digits, dist);
                     fputc(']', out);
+                    mh_cli_json_obj_end(out);
                 } else {
                     const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                     fprintf(out, "%.*f%s%.*f%s", digits, bearing, sep, digits, dist, i + 1 < lines.length ? "\n" : "");
@@ -2163,7 +2418,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2172,7 +2427,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "initial-bearing") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -2196,13 +2451,13 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             st = mh_to_center_latlon(tokens.items[1], &lat_b, &lon_b, &ctx);
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             mh_point a = {lat_a, lon_a};
             mh_point b = {lat_b, lon_b};
@@ -2211,13 +2466,19 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                mh_cli_json_print_point_input(out, tokens.items[0], 1, lat_a, lon_a);
+                fputc(',', out);
+                mh_cli_json_print_point_input(out, tokens.items[1], 1, lat_b, lon_b);
+                fputs("],\"output\":", out);
                 fprintf(out, "%.*f", digits, bearing);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%.*f%s", digits, bearing, i + 1 < lines.length ? "," : "");
             } else {
@@ -2226,7 +2487,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2235,7 +2496,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "neighbors") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_list list = {NULL, 0};
@@ -2243,12 +2504,13 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_neighbors(lines.items[i], ring, diagonals, &list, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fputc('[', out);
                 for (size_t j = 0; j < list.length; j++) {
                     if (j > 0) {
@@ -2257,6 +2519,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     mh_cli_print_json_string(out, list.items[j]);
                 }
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 for (size_t j = 0; j < list.length; j++) {
                     fprintf(out, "%s%s", list.items[j], j + 1 < list.length ? "," : "");
@@ -2271,7 +2534,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_free_list(&list);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2280,7 +2543,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "adjacent") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_kv_list list = {NULL, NULL, 0};
@@ -2288,12 +2551,13 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_adjacent(lines.items[i], diagonals, &list, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fputc('[', out);
                 for (size_t j = 0; j < list.length; j++) {
                     if (j > 0) {
@@ -2306,6 +2570,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     fputc(']', out);
                 }
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 for (size_t j = 0; j < list.length; j++) {
                     fprintf(out, "%s:%s%s", list.keys[j], list.values[j], j + 1 < list.length ? "," : "");
@@ -2320,7 +2585,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_free_kv_list(&list);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2329,7 +2594,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "corners") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_corners_t corners;
@@ -2337,12 +2602,13 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_corners(lines.items[i], &corners, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fputc('[', out);
                 mh_point pts[4] = {corners.nw, corners.ne, corners.sw, corners.se};
                 for (int p = 0; p < 4; p++) {
@@ -2356,6 +2622,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     fputc(']', out);
                 }
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else {
                 const char *point_sep = strcmp(format, "csv") == 0 ? "," : " ";
                 char buf[128];
@@ -2370,7 +2637,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2379,7 +2646,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "precision") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             char norm[12];
@@ -2387,14 +2654,16 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_normalize_locator(lines.items[i], norm, sizeof(norm), &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             int p = (int)strlen(norm);
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fprintf(out, "%d", p);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%d%s", p, i + 1 < lines.length ? "," : "");
             } else {
@@ -2402,7 +2671,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2411,7 +2680,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "parent") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_grid grid;
@@ -2420,13 +2689,15 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_parent(lines.items[i], target, &grid, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 mh_cli_print_json_string(out, grid.locator);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%s%s", grid.locator, i + 1 < lines.length ? "," : "");
             } else {
@@ -2434,7 +2705,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2443,7 +2714,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "children") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_grid grid;
@@ -2451,7 +2722,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_parse_locator(lines.items[i], &grid, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             int target = precision >= 0 ? precision : (grid.precision + 2);
             mh_cli_lines children;
@@ -2461,12 +2732,13 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_lines_free(&children);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fputc('[', out);
                 for (size_t j = 0; j < children.length; j++) {
                     if (j > 0) {
@@ -2475,6 +2747,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     mh_cli_print_json_string(out, children.items[j]);
                 }
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 for (size_t j = 0; j < children.length; j++) {
                     fprintf(out, "%s%s", children.items[j], j + 1 < children.length ? "," : "");
@@ -2489,7 +2762,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_lines_free(&children);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2498,7 +2771,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "size") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             char norm[12];
@@ -2506,7 +2779,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_normalize_locator(lines.items[i], norm, sizeof(norm), &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             int prec = (int)strlen(norm);
             double lon_step = 0.0;
@@ -2514,7 +2787,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             st = mh_cli_step_size_for_precision(prec, &lon_step, &lat_step, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             double width = lon_step;
             double height = lat_step;
@@ -2524,7 +2797,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 st = mh_to_center_latlon(norm, &lat, &lon, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 double ref_lat = have_at_lat ? at_lat : lat;
                 double half_lon = lon_step / 2.0;
@@ -2539,12 +2812,12 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 st = mh_distance_km(&a, &b, method_code, &width_km, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 st = mh_distance_km(&c, &d, method_code, &height_km, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 width = width_km;
                 height = height_km;
@@ -2557,18 +2830,20 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fputc('[', out);
                 fprintf(out, "%.*f", digits, width);
                 fputc(',', out);
                 fprintf(out, "%.*f", digits, height);
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 fprintf(out, "%.*f%s%.*f%s", digits, width, sep, digits, height, i + 1 < lines.length ? "\n" : "");
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2587,7 +2862,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 mh_status st = mh_to_bbox(lines.items[i], &bbox, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 mh_point poly[4] = {
                     {bbox.min_lat, bbox.min_lon},
@@ -2598,7 +2873,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 mh_status st2 = mh_geodesic_area_km2(poly, 4, &area, &ctx);
                 if (st2 != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 if (area < 0.0) {
                     area = -area;
@@ -2610,20 +2885,20 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 mh_status st = mh_normalize_locator(lines.items[i], norm, sizeof(norm), &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 int prec = (int)strlen(norm);
                 st = mh_cli_step_size_for_precision(prec, &lon_step, &lat_step, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 double lat = 0.0;
                 double lon = 0.0;
                 st = mh_to_center_latlon(norm, &lat, &lon, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 double half_lon = lon_step / 2.0;
                 double half_lat = lat_step / 2.0;
@@ -2636,12 +2911,12 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 st = mh_distance_km(&a, &b, MH_DISTANCE_HAVERSINE, &width_km, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 st = mh_distance_km(&c, &d, MH_DISTANCE_HAVERSINE, &height_km, &ctx);
                 if (st != MH_OK) {
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
                 area = width_km * height_km;
             }
@@ -2649,7 +2924,11 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":", out);
+                mh_cli_print_json_string(out, lines.items[i]);
+                fputs(",\"output\":", out);
                 fprintf(out, "%.*f", digits, area);
+                fputc('}', out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%.*f%s", digits, area, i + 1 < lines.length ? "," : "");
             } else {
@@ -2658,15 +2937,17 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
         }
         if (strcmp(format, "json") == 0) {
             fputc(']', out);
+            fputc('\n', out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
 
     if (strcmp(op, "diagonal") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_bbox bbox;
@@ -2674,7 +2955,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_to_bbox(lines.items[i], &bbox, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             mh_point a = {bbox.min_lat, bbox.min_lon};
             mh_point b = {bbox.max_lat, bbox.max_lon};
@@ -2683,13 +2964,15 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             st = mh_distance_km(&a, &b, method_code, &dist, &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 fprintf(out, "%.*f", digits, dist);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%.*f%s", digits, dist, i + 1 < lines.length ? "," : "");
             } else {
@@ -2697,7 +2980,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2706,7 +2989,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "utm") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             char buf[8];
@@ -2714,13 +2997,15 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_status st = mh_to_utm_zone(lines.items[i], buf, sizeof(buf), &ctx);
             if (st != MH_OK) {
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 mh_cli_print_json_string(out, buf);
+                mh_cli_json_obj_end(out);
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(out, "%s%s", buf, i + 1 < lines.length ? "," : "");
             } else {
@@ -2728,7 +3013,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             }
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2746,10 +3031,20 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             for (size_t i = 0; i < lines.length; i++) {
                 locs[i] = lines.items[i];
             }
-            int rc = mh_cli_geojson_feature_collection(locs, lines.length, out, err);
+            char *buf = mh_cli_geojson_feature_collection_alloc(locs, lines.length, err);
             free(locs);
+            if (!buf) {
+                mh_cli_lines_free(&lines);
+                return 2;
+            }
+            fputc('[', out);
+            mh_cli_json_obj_start_input_array(out, (const char **)lines.items, lines.length);
+            fputs(buf, out);
+            mh_cli_json_obj_end(out);
+            fputs("]\n", out);
+            free(buf);
             mh_cli_lines_free(&lines);
-            return rc;
+            return 0;
         }
         if (strcmp(geojson_format, "feature") == 0) {
             fputc('[', out);
@@ -2768,7 +3063,9 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                         if (i > 0) {
                             fputc(',', out);
                         }
+                        mh_cli_json_obj_start_input_string(out, lines.items[i]);
                         fputs(buf, out);
+                        mh_cli_json_obj_end(out);
                         free(buf);
                         break;
                     }
@@ -2778,7 +3075,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                         continue;
                     }
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
             }
             fputs("]\n", out);
@@ -2791,20 +3088,21 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                mh_cli_json_obj_start_input_string(out, lines.items[i]);
                 if (split) {
                     mh_bbox bbox;
                     mh_error_context ctx = {MH_OK, NULL, NULL, NULL};
                     mh_status st = mh_to_bbox(lines.items[i], &bbox, &ctx);
                     if (st != MH_OK) {
                         mh_cli_lines_free(&lines);
-                        return mh_cli_print_mh_error(err, &ctx);
+                        return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                     }
                     mh_bbox parts[2];
                     size_t parts_len = 2;
                     st = mh_split_bbox_list(bbox, parts, &parts_len, &ctx);
                     if (st != MH_OK) {
                         mh_cli_lines_free(&lines);
-                        return mh_cli_print_mh_error(err, &ctx);
+                        return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                     }
                     if (parts_len == 0) {
                         parts[0] = bbox;
@@ -2824,10 +3122,11 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     mh_status st = mh_to_geojson_bbox(lines.items[i], out_bbox, &ctx);
                     if (st != MH_OK) {
                         mh_cli_lines_free(&lines);
-                        return mh_cli_print_mh_error(err, &ctx);
+                        return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                     }
                     mh_cli_print_geojson_bbox(out, out_bbox);
                 }
+                mh_cli_json_obj_end(out);
             }
             fputs("]\n", out);
             mh_cli_lines_free(&lines);
@@ -2835,38 +3134,43 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
         }
         if (strcmp(geojson_format, "envelope") == 0) {
             if (split) {
-                fputs("{\"type\":\"FeatureCollection\",\"features\":[", out);
-                int first = 1;
+                fputc('[', out);
                 for (size_t i = 0; i < lines.length; i++) {
+                    if (i > 0) {
+                        fputc(',', out);
+                    }
                     mh_bbox bbox;
                     mh_error_context ctx = {MH_OK, NULL, NULL, NULL};
                     mh_status st = mh_to_bbox(lines.items[i], &bbox, &ctx);
                     if (st != MH_OK) {
                         mh_cli_lines_free(&lines);
-                        return mh_cli_print_mh_error(err, &ctx);
+                        return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                     }
                     mh_bbox parts[2];
                     size_t parts_len = 2;
                     st = mh_split_bbox_list(bbox, parts, &parts_len, &ctx);
                     if (st != MH_OK) {
                         mh_cli_lines_free(&lines);
-                        return mh_cli_print_mh_error(err, &ctx);
+                        return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                     }
                     if (parts_len == 0) {
                         parts[0] = bbox;
                         parts_len = 1;
                     }
+                    mh_cli_json_obj_start_input_string(out, lines.items[i]);
+                    fputs("{\"type\":\"FeatureCollection\",\"features\":[", out);
                     for (size_t p = 0; p < parts_len; p++) {
-                        if (!first) {
+                        if (p > 0) {
                             fputc(',', out);
                         }
-                        first = 0;
                         fputs("{\"type\":\"Feature\",\"geometry\":", out);
                         mh_cli_print_geojson_polygon(out, parts[p]);
                         fputs(",\"properties\":{}}", out);
                     }
+                    fputs("]}", out);
+                    mh_cli_json_obj_end(out);
                 }
-                fputs("]}\n", out);
+                fputs("]\n", out);
                 mh_cli_lines_free(&lines);
                 return 0;
             }
@@ -2886,7 +3190,9 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                         if (i > 0) {
                             fputc(',', out);
                         }
+                        mh_cli_json_obj_start_input_string(out, lines.items[i]);
                         fputs(buf, out);
+                        mh_cli_json_obj_end(out);
                         free(buf);
                         break;
                     }
@@ -2896,7 +3202,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                         continue;
                     }
                     mh_cli_lines_free(&lines);
-                    return mh_cli_print_mh_error(err, &ctx);
+                    return mh_cli_print_mh_error_line(err, &ctx, i + 1);
                 }
             }
             fputs("]\n", out);
@@ -2910,7 +3216,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "bbox-split") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -2938,7 +3244,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (parts_len == 0) {
                 parts[0] = bbox;
@@ -2948,6 +3254,9 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                fprintf(out, "%.17g,%.17g,%.17g,%.17g", bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon);
+                fputs("],\"output\":", out);
                 fputc('[', out);
                 for (size_t p = 0; p < parts_len; p++) {
                     if (p > 0) {
@@ -2956,6 +3265,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     mh_cli_print_bbox_json(out, &parts[p]);
                 }
                 fputc(']', out);
+                fputc('}', out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 for (size_t p = 0; p < parts_len; p++) {
@@ -2968,7 +3278,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -2977,7 +3287,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
 
     if (strcmp(op, "bbox-split-list") == 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -3005,12 +3315,15 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             if (st != MH_OK) {
                 mh_cli_tokens_free(&tokens);
                 mh_cli_lines_free(&lines);
-                return mh_cli_print_mh_error(err, &ctx);
+                return mh_cli_print_mh_error_line(err, &ctx, i + 1);
             }
             if (strcmp(format, "json") == 0) {
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                fprintf(out, "%.17g,%.17g,%.17g,%.17g", bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon);
+                fputs("],\"output\":", out);
                 fputc('[', out);
                 for (size_t p = 0; p < parts_len; p++) {
                     if (p > 0) {
@@ -3019,6 +3332,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     mh_cli_print_bbox_json(out, &parts[p]);
                 }
                 fputc(']', out);
+                fputc('}', out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 for (size_t p = 0; p < parts_len; p++) {
@@ -3031,7 +3345,7 @@ static int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
         }
         fputc('\n', out);
         mh_cli_lines_free(&lines);
@@ -3087,7 +3401,7 @@ static int mh_cli_handle_from_latlon(int argc, char **argv, FILE *out, FILE *err
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -3126,7 +3440,11 @@ static int mh_cli_handle_from_latlon(int argc, char **argv, FILE *out, FILE *err
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":", out);
+                mh_cli_json_print_latlon(out, lat, lon);
+                fputs(",\"output\":", out);
                 mh_cli_print_json_string(out, grid.locator);
+                fputc('}', out);
             } else {
                 fprintf(out, "%s%s", grid.locator, i + 1 < lines.length ? "\n" : "");
             }
@@ -3134,8 +3452,10 @@ static int mh_cli_handle_from_latlon(int argc, char **argv, FILE *out, FILE *err
         }
         if (strcmp(format, "json") == 0) {
             fputc(']', out);
+            fputc('\n', out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         free(latlon_parts);
         mh_cli_lines_free(&lines);
         return 0;
@@ -3164,7 +3484,16 @@ static int mh_cli_handle_from_latlon(int argc, char **argv, FILE *out, FILE *err
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    fprintf(out, "%s\n", grid.locator);
+    if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":", out);
+        mh_cli_json_print_latlon(out, lat, lon);
+        fputs(",\"output\":", out);
+        mh_cli_print_json_string(out, grid.locator);
+        mh_cli_json_obj_end(out);
+        fputc('\n', out);
+    } else {
+        fprintf(out, "%s\n", grid.locator);
+    }
     free(latlon_parts);
     mh_cli_lines_free(&lines);
     return 0;
@@ -3316,7 +3645,7 @@ static int mh_cli_handle_contains_point(int argc, char **argv, FILE *out, FILE *
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -3362,9 +3691,10 @@ static int mh_cli_handle_contains_point(int argc, char **argv, FILE *out, FILE *
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         free(latlon_parts);
         mh_cli_lines_free(&lines);
         return 0;
@@ -3393,7 +3723,18 @@ static int mh_cli_handle_contains_point(int argc, char **argv, FILE *out, FILE *
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    fprintf(out, "%s\n", hit ? "true" : "false");
+    if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":[", out);
+        mh_cli_print_json_string(out, locator);
+        fputc(',', out);
+        mh_cli_json_print_latlon(out, lat, lon);
+        fputs("],\"output\":", out);
+        fputs(hit ? "true" : "false", out);
+        fputc('}', out);
+        fputc('\n', out);
+    } else {
+        fprintf(out, "%s\n", hit ? "true" : "false");
+    }
     free(latlon_parts);
     mh_cli_lines_free(&lines);
     return 0;
@@ -3475,7 +3816,7 @@ static int mh_cli_handle_intersects_bbox(int argc, char **argv, FILE *out, FILE 
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -3515,9 +3856,10 @@ static int mh_cli_handle_intersects_bbox(int argc, char **argv, FILE *out, FILE 
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -3536,7 +3878,17 @@ static int mh_cli_handle_intersects_bbox(int argc, char **argv, FILE *out, FILE 
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    fprintf(out, "%s\n", hit ? "true" : "false");
+    if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":[", out);
+        mh_cli_print_json_string(out, locator);
+        fputc(',', out);
+        fprintf(out, "%.17g,%.17g,%.17g,%.17g", min_lat, min_lon, max_lat, max_lon);
+        fputs("],\"output\":", out);
+        fputs(hit ? "true" : "false", out);
+        fputs("}\n", out);
+    } else {
+        fprintf(out, "%s\n", hit ? "true" : "false");
+    }
     mh_cli_lines_free(&lines);
     return 0;
 }
@@ -3580,7 +3932,7 @@ static int mh_cli_handle_intersects_polygon(int argc, char **argv, FILE *out, FI
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -3641,9 +3993,10 @@ static int mh_cli_handle_intersects_polygon(int argc, char **argv, FILE *out, FI
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
+            mh_cli_json_bulk_end(out);
+        } else {
+            fputc('\n', out);
         }
-        fputc('\n', out);
         free(point_parts);
         mh_cli_lines_free(&lines);
         return 0;
@@ -3680,12 +4033,27 @@ static int mh_cli_handle_intersects_polygon(int argc, char **argv, FILE *out, FI
     mh_error_context ctx = {MH_OK, NULL, NULL, NULL};
     mh_status st = mh_intersects_polygon(locator, points, point_len, &hit, &ctx);
     free(points);
-    free(point_parts);
-    mh_cli_lines_free(&lines);
     if (st != MH_OK) {
+        free(point_parts);
+        mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    fprintf(out, "%s\n", hit ? "true" : "false");
+    if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":[", out);
+        mh_cli_print_json_string(out, locator);
+        for (size_t p = 0; p < point_len; p++) {
+            fputc(',', out);
+            mh_cli_json_print_latlon(out, points[p].lat, points[p].lon);
+        }
+        fputs("],\"output\":", out);
+        fputs(hit ? "true" : "false", out);
+        mh_cli_json_obj_end(out);
+        fputc('\n', out);
+    } else {
+        fprintf(out, "%s\n", hit ? "true" : "false");
+    }
+    free(point_parts);
+    mh_cli_lines_free(&lines);
     return 0;
 }
 
@@ -3958,11 +4326,14 @@ static int mh_cli_handle_area(int argc, char **argv, FILE *out, FILE *err) {
     const char *locator = NULL;
     const char *method = "spherical";
     int digits = MH_CLI_DEFAULT_DIGITS;
+    const char *format = "plain";
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--method") == 0 && i + 1 < argc) {
             method = argv[++i];
         } else if (strcmp(argv[i], "--digits") == 0 && i + 1 < argc) {
             digits = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
+            format = argv[++i];
         } else if (!locator) {
             locator = argv[i];
         } else {
@@ -4032,7 +4403,15 @@ static int mh_cli_handle_area(int argc, char **argv, FILE *out, FILE *err) {
         area = width_km * height_km;
     }
 
-    fprintf(out, "%.*f\n", digits, area);
+    if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":", out);
+        mh_cli_print_json_string(out, locator);
+        fputs(",\"output\":", out);
+        fprintf(out, "%.*f", digits, area);
+        fputs("}\n", out);
+    } else {
+        fprintf(out, "%.*f\n", digits, area);
+    }
     return 0;
 }
 
@@ -4669,7 +5048,7 @@ static int mh_cli_handle_cover_circle(int argc, char **argv, FILE *out, FILE *er
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -4711,6 +5090,13 @@ static int mh_cli_handle_cover_circle(int argc, char **argv, FILE *out, FILE *er
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                mh_cli_json_print_point_input(out, tokens.items[0], is_loc, center.lat, center.lon);
+                fputc(',', out);
+                mh_cli_print_json_float(out, rad);
+                fputc(',', out);
+                fprintf(out, "%d", prec);
+                fputs("],\"output\":", out);
                 fputc('[', out);
                 for (size_t j = 0; j < list.length; j++) {
                     if (j > 0) {
@@ -4719,6 +5105,7 @@ static int mh_cli_handle_cover_circle(int argc, char **argv, FILE *out, FILE *er
                     mh_cli_print_json_string(out, list.items[j]);
                 }
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 for (size_t j = 0; j < list.length; j++) {
@@ -4730,8 +5117,7 @@ static int mh_cli_handle_cover_circle(int argc, char **argv, FILE *out, FILE *er
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
-            fputc('\n', out);
+            mh_cli_json_bulk_end(out);
         } else {
             fputc('\n', out);
         }
@@ -4767,11 +5153,31 @@ static int mh_cli_handle_cover_circle(int argc, char **argv, FILE *out, FILE *er
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    const char *sep = csv ? "," : " ";
-    for (size_t j = 0; j < list.length; j++) {
-        fprintf(out, "%s%s", list.items[j], j + 1 < list.length ? sep : "");
+    if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":[", out);
+        mh_cli_json_print_point_input(out, center_parts[0], is_loc, center.lat, center.lon);
+        fputc(',', out);
+        mh_cli_print_json_float(out, radius_km);
+        fputc(',', out);
+        fprintf(out, "%d", precision);
+        fputs("],\"output\":", out);
+        fputc('[', out);
+        for (size_t j = 0; j < list.length; j++) {
+            if (j > 0) {
+                fputc(',', out);
+            }
+            mh_cli_print_json_string(out, list.items[j]);
+        }
+        fputc(']', out);
+        mh_cli_json_obj_end(out);
+        fputc('\n', out);
+    } else {
+        const char *sep = csv ? "," : " ";
+        for (size_t j = 0; j < list.length; j++) {
+            fprintf(out, "%s%s", list.items[j], j + 1 < list.length ? sep : "");
+        }
+        fprintf(out, "\n");
     }
-    fprintf(out, "\n");
     mh_free_list(&list);
     free(center_parts);
     mh_cli_lines_free(&lines);
@@ -4826,7 +5232,7 @@ static int mh_cli_handle_cover_line(int argc, char **argv, FILE *out, FILE *err)
 
     if (lines.length > 0) {
         if (strcmp(format, "json") == 0) {
-            fputc('[', out);
+            mh_cli_json_bulk_start(out, &lines);
         }
         for (size_t i = 0; i < lines.length; i++) {
             mh_cli_tokens tokens;
@@ -4848,16 +5254,17 @@ static int mh_cli_handle_cover_line(int argc, char **argv, FILE *out, FILE *err)
             mh_point b;
             char loc_a[12];
             char loc_b[12];
-            int is_loc = 0;
+            int is_loc_a = 0;
+            int is_loc_b = 0;
             mh_error_context ctx = {MH_OK, NULL, NULL, NULL};
-            if (!mh_cli_parse_point_parts((const char **)&tokens.items[0], 1, &a, loc_a, sizeof(loc_a), &is_loc, &ctx)) {
+            if (!mh_cli_parse_point_parts((const char **)&tokens.items[0], 1, &a, loc_a, sizeof(loc_a), &is_loc_a, &ctx)) {
                 mh_cli_tokens_free(&tokens);
                 free(point_parts);
                 mh_cli_lines_free(&lines);
                 mh_cli_print_error(err, "Point must be 'lat,lon' or a locator");
                 return 2;
             }
-            if (!mh_cli_parse_point_parts((const char **)&tokens.items[1], 1, &b, loc_b, sizeof(loc_b), &is_loc, &ctx)) {
+            if (!mh_cli_parse_point_parts((const char **)&tokens.items[1], 1, &b, loc_b, sizeof(loc_b), &is_loc_b, &ctx)) {
                 mh_cli_tokens_free(&tokens);
                 free(point_parts);
                 mh_cli_lines_free(&lines);
@@ -4876,6 +5283,13 @@ static int mh_cli_handle_cover_line(int argc, char **argv, FILE *out, FILE *err)
                 if (i > 0) {
                     fputc(',', out);
                 }
+                fputs("{\"input\":[", out);
+                mh_cli_json_print_point_input(out, tokens.items[0], is_loc_a, a.lat, a.lon);
+                fputc(',', out);
+                mh_cli_json_print_point_input(out, tokens.items[1], is_loc_b, b.lat, b.lon);
+                fputc(',', out);
+                fprintf(out, "%d", prec);
+                fputs("],\"output\":", out);
                 fputc('[', out);
                 for (size_t j = 0; j < list.length; j++) {
                     if (j > 0) {
@@ -4884,6 +5298,7 @@ static int mh_cli_handle_cover_line(int argc, char **argv, FILE *out, FILE *err)
                     mh_cli_print_json_string(out, list.items[j]);
                 }
                 fputc(']', out);
+                mh_cli_json_obj_end(out);
             } else {
                 const char *sep = strcmp(format, "csv") == 0 ? "," : " ";
                 for (size_t j = 0; j < list.length; j++) {
@@ -4895,8 +5310,7 @@ static int mh_cli_handle_cover_line(int argc, char **argv, FILE *out, FILE *err)
             mh_cli_tokens_free(&tokens);
         }
         if (strcmp(format, "json") == 0) {
-            fputc(']', out);
-            fputc('\n', out);
+            mh_cli_json_bulk_end(out);
         } else {
             fputc('\n', out);
         }
@@ -4925,15 +5339,16 @@ static int mh_cli_handle_cover_line(int argc, char **argv, FILE *out, FILE *err)
     mh_point a;
     mh_point b;
     char loc_buf[12];
-    int is_loc = 0;
+    int is_loc_a = 0;
+    int is_loc_b = 0;
     mh_error_context ctx = {MH_OK, NULL, NULL, NULL};
-    if (!mh_cli_parse_point_parts(a_parts, a_len, &a, loc_buf, sizeof(loc_buf), &is_loc, &ctx)) {
+    if (!mh_cli_parse_point_parts(a_parts, a_len, &a, loc_buf, sizeof(loc_buf), &is_loc_a, &ctx)) {
         free(point_parts);
         mh_cli_lines_free(&lines);
         mh_cli_print_error(err, "Point must be 'lat,lon' or a locator");
         return 2;
     }
-    if (!mh_cli_parse_point_parts(b_parts, b_len, &b, loc_buf, sizeof(loc_buf), &is_loc, &ctx)) {
+    if (!mh_cli_parse_point_parts(b_parts, b_len, &b, loc_buf, sizeof(loc_buf), &is_loc_b, &ctx)) {
         free(point_parts);
         mh_cli_lines_free(&lines);
         mh_cli_print_error(err, "Point must be 'lat,lon' or a locator");
@@ -4946,11 +5361,31 @@ static int mh_cli_handle_cover_line(int argc, char **argv, FILE *out, FILE *err)
         mh_cli_lines_free(&lines);
         return mh_cli_print_mh_error(err, &ctx);
     }
-    const char *sep = csv ? "," : " ";
-    for (size_t j = 0; j < list.length; j++) {
-        fprintf(out, "%s%s", list.items[j], j + 1 < list.length ? sep : "");
+    if (strcmp(format, "json") == 0) {
+        fputs("{\"input\":[", out);
+        mh_cli_json_print_point_input(out, a_parts[0], is_loc_a, a.lat, a.lon);
+        fputc(',', out);
+        mh_cli_json_print_point_input(out, b_parts[0], is_loc_b, b.lat, b.lon);
+        fputc(',', out);
+        fprintf(out, "%d", precision);
+        fputs("],\"output\":", out);
+        fputc('[', out);
+        for (size_t j = 0; j < list.length; j++) {
+            if (j > 0) {
+                fputc(',', out);
+            }
+            mh_cli_print_json_string(out, list.items[j]);
+        }
+        fputc(']', out);
+        mh_cli_json_obj_end(out);
+        fputc('\n', out);
+    } else {
+        const char *sep = csv ? "," : " ";
+        for (size_t j = 0; j < list.length; j++) {
+            fprintf(out, "%s%s", list.items[j], j + 1 < list.length ? sep : "");
+        }
+        fprintf(out, "\n");
     }
-    fprintf(out, "\n");
     mh_free_list(&list);
     free(point_parts);
     mh_cli_lines_free(&lines);
@@ -5011,7 +5446,7 @@ int mh_cli_main_io(int argc, char **argv, FILE *out, FILE *err) {
         return 0;
     }
     if (strcmp(argv[1], "--version") == 0) {
-        fprintf(out, "mh 1.0.0rc1\n");
+        fprintf(out, "mh 1.0.0rc2-001\n");
         return 0;
     }
     if (strcmp(argv[1], "normalize") == 0) {

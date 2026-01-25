@@ -29,6 +29,16 @@ target_include_directories(
 
 target_link_libraries(_native PRIVATE Python::Module)
 
+# simdjson is required for _native json_loads.
+find_path(SIMDJSON_INCLUDE_DIR simdjson.h)
+find_library(SIMDJSON_LIBRARY simdjson)
+if(NOT SIMDJSON_INCLUDE_DIR OR NOT SIMDJSON_LIBRARY)
+    message(FATAL_ERROR "simdjson not found but required for native build")
+endif()
+target_include_directories(_native PRIVATE ${SIMDJSON_INCLUDE_DIR})
+target_link_libraries(_native PRIVATE ${SIMDJSON_LIBRARY})
+target_compile_definitions(_native PRIVATE MH_HAVE_SIMDJSON=1)
+
 add_executable(
     mh_cli
     src/maidenhead/_native/cli.c

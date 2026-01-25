@@ -1,10 +1,12 @@
 import os
+import sys
 import shutil
 import subprocess
 from ctypes.util import find_library
 
 from setuptools import Extension, setup
 from setuptools.command.build_py import build_py as _build_py
+from setuptools.command.build_ext import build_ext as _build_ext
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
 
@@ -33,6 +35,15 @@ if simdjson_root:
     include_dirs.append(os.path.join(simdjson_root, "include"))
     library_dirs.append(os.path.join(simdjson_root, "lib"))
 
+conda_prefix = os.environ.get("CONDA_PREFIX")
+if conda_prefix:
+    include_dirs.append(os.path.join(conda_prefix, "include"))
+    library_dirs.append(os.path.join(conda_prefix, "lib"))
+
+# Fallback to the active Python prefix for build-isolation cases.
+include_dirs.append(os.path.join(sys.prefix, "include"))
+library_dirs.append(os.path.join(sys.prefix, "lib"))
+
 lib_geo = find_library("GeographicLib")
 geo_header = None
 for inc in include_dirs:
@@ -48,19 +59,21 @@ if lib_geo and geo_header:
 
 lib_simdjson = find_library("simdjson")
 simdjson_header = None
-for inc in include_dirs:
+for inc in include_dirs + ["/usr/include", "/usr/local/include"]:
     candidate = os.path.join(inc, "simdjson.h")
     if os.path.exists(candidate):
         simdjson_header = candidate
         break
-if lib_simdjson and simdjson_header:
+simdjson_available = bool(lib_simdjson and simdjson_header)
+if simdjson_available:
     native_sources.append("src/maidenhead/_native/json_simdjson.cpp")
     libraries.append("simdjson")
     define_macros.append(("MH_HAVE_SIMDJSON", "1"))
     language = "c++"
 
 if language == "c++" and os.name != "nt":
-    extra_compile_args.append("-std=c++11")
+    # Avoid passing C++ flags to C sources; rely on compiler default for C++.
+    pass
 
 ext_modules = [
     Extension(
@@ -91,9 +104,11 @@ class build_py(_build_py):
             print("build_temp not available; skipping mh_cli build")
             return
         build_dir = os.path.join(build_temp, "mh_cli")
+        if os.path.isdir(build_dir):
+            shutil.rmtree(build_dir, ignore_errors=True)
         os.makedirs(build_dir, exist_ok=True)
         subprocess.check_call([cmake, "-S", ROOT, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release"])
-        subprocess.check_call([cmake, "--build", build_dir, "--target", "mh_cli", "-j", "2"])
+        subprocess.check_call([cmake, "--build", build_dir, "--target", "mh_cli", "-j", "2", "--clean-first"])
         exe_name = "mh_cli.exe" if os.name == "nt" else "mh_cli"
         src_bin = os.path.join(build_dir, exe_name)
         if not os.path.exists(src_bin):
@@ -102,9 +117,37 @@ class build_py(_build_py):
         dest_dir = os.path.join(self.build_lib, "maidenhead", "bin")
         os.makedirs(dest_dir, exist_ok=True)
         dest_bin = os.path.join(dest_dir, exe_name)
+        if os.path.exists(dest_bin):
+            os.remove(dest_bin)
         shutil.copy2(src_bin, dest_bin)
         if os.name != "nt":
             os.chmod(dest_bin, 0o755)
 
+class build_ext(_build_ext):
+    def run(self):
+        if not simdjson_available:
+            raise RuntimeError(
+                "simdjson is required to build the native extension; "
+                "install system simdjson dev packages or set SIMDJSON_DIR"
+            )
+        script = os.path.join(ROOT, "scripts", "build_native_ext.sh")
+        preferred_python = "/home/dorje/miniforge3/envs/WSPR/bin/python"
+        python_bin = preferred_python if os.path.exists(preferred_python) else sys.executable
+        env = os.environ.copy()
+        env["PYTHON_BIN"] = python_bin
+        subprocess.check_call([script], env=env, cwd=ROOT)
 
-setup(ext_modules=ext_modules, cmdclass={"build_py": build_py})
+        # Stage the CMake-built extension into the build output directory.
+        import sysconfig
+
+        ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ""
+        if not ext_suffix:
+            raise RuntimeError("Could not determine Python extension suffix for build")
+        src_so = os.path.join(ROOT, "src", "maidenhead", f"_native{ext_suffix}")
+        if not os.path.exists(src_so):
+            raise RuntimeError(f"Native extension not found at {src_so}")
+        dest_dir = os.path.join(self.build_lib, "maidenhead")
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copy2(src_so, os.path.join(dest_dir, os.path.basename(src_so)))
+
+setup(ext_modules=ext_modules, cmdclass={"build_py": build_py, "build_ext": build_ext})
