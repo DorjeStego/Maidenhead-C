@@ -3527,12 +3527,15 @@ static int mh_cli_handle_children(int argc, char **argv, FILE *out, FILE *err) {
     int precision = -1;
     int csv = 0;
     int limit = -1;
+    const char *format = "plain";
 
     for (int i = 2; i < argc; i++) {
         if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--precision") == 0) && i + 1 < argc) {
             precision = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc) {
             limit = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
+            format = argv[++i];
         } else if (strcmp(argv[i], "--csv") == 0) {
             csv = 1;
         } else if (!locator) {
@@ -3567,11 +3570,26 @@ static int mh_cli_handle_children(int argc, char **argv, FILE *out, FILE *err) {
         return mh_cli_print_mh_error(err, &ctx);
     }
 
-    const char *sep = csv ? "," : " ";
-    for (size_t i = 0; i < lines.length; i++) {
-        fprintf(out, "%s%s", lines.items[i], i + 1 < lines.length ? sep : "");
+    if (strcmp(format, "json") == 0) {
+        fputc('[', out);
+        fputs("{\"input\":", out);
+        mh_cli_print_json_string(out, locator);
+        fputs(",\"output\":", out);
+        fputc('[', out);
+        for (size_t i = 0; i < lines.length; i++) {
+            if (i > 0) {
+                fputc(',', out);
+            }
+            mh_cli_print_json_string(out, lines.items[i]);
+        }
+        fputs("]}]\n", out);
+    } else {
+        const char *sep = csv ? "," : " ";
+        for (size_t i = 0; i < lines.length; i++) {
+            fprintf(out, "%s%s", lines.items[i], i + 1 < lines.length ? sep : "");
+        }
+        fprintf(out, "\n");
     }
-    fprintf(out, "\n");
     mh_cli_lines_free(&lines);
     return 0;
 }
@@ -3743,10 +3761,13 @@ static int mh_cli_handle_contains_point(int argc, char **argv, FILE *out, FILE *
 static int mh_cli_handle_parent(int argc, char **argv, FILE *out, FILE *err) {
     const char *locator = NULL;
     int precision = -1;
+    const char *format = "plain";
 
     for (int i = 2; i < argc; i++) {
         if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--precision") == 0) && i + 1 < argc) {
             precision = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
+            format = argv[++i];
         } else if (!locator) {
             locator = argv[i];
         } else {
@@ -3766,7 +3787,16 @@ static int mh_cli_handle_parent(int argc, char **argv, FILE *out, FILE *err) {
     if (st != MH_OK) {
         return mh_cli_print_mh_error(err, &ctx);
     }
-    fprintf(out, "%s\n", grid.locator);
+    if (strcmp(format, "json") == 0) {
+        fputc('[', out);
+        fputs("{\"input\":", out);
+        mh_cli_print_json_string(out, locator);
+        fputs(",\"output\":", out);
+        mh_cli_print_json_string(out, grid.locator);
+        fputs("}]\n", out);
+    } else {
+        fprintf(out, "%s\n", grid.locator);
+    }
     return 0;
 }
 
@@ -5446,7 +5476,7 @@ int mh_cli_main_io(int argc, char **argv, FILE *out, FILE *err) {
         return 0;
     }
     if (strcmp(argv[1], "--version") == 0) {
-        fprintf(out, "mh 1.0.0rc2-001\n");
+        fprintf(out, "mh 1.0.0rc2-002\n");
         return 0;
     }
     if (strcmp(argv[1], "normalize") == 0) {
