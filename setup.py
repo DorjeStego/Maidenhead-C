@@ -104,9 +104,11 @@ class build_py(_build_py):
             print("build_temp not available; skipping mh_cli build")
             return
         build_dir = os.path.join(build_temp, "mh_cli")
+        if os.path.isdir(build_dir):
+            shutil.rmtree(build_dir, ignore_errors=True)
         os.makedirs(build_dir, exist_ok=True)
         subprocess.check_call([cmake, "-S", ROOT, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release"])
-        subprocess.check_call([cmake, "--build", build_dir, "--target", "mh_cli", "-j", "2"])
+        subprocess.check_call([cmake, "--build", build_dir, "--target", "mh_cli", "-j", "2", "--clean-first"])
         exe_name = "mh_cli.exe" if os.name == "nt" else "mh_cli"
         src_bin = os.path.join(build_dir, exe_name)
         if not os.path.exists(src_bin):
@@ -115,6 +117,8 @@ class build_py(_build_py):
         dest_dir = os.path.join(self.build_lib, "maidenhead", "bin")
         os.makedirs(dest_dir, exist_ok=True)
         dest_bin = os.path.join(dest_dir, exe_name)
+        if os.path.exists(dest_bin):
+            os.remove(dest_bin)
         shutil.copy2(src_bin, dest_bin)
         if os.name != "nt":
             os.chmod(dest_bin, 0o755)
