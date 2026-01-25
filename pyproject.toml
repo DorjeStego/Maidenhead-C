@@ -20,7 +20,7 @@ geo = ["geographiclib"]
 vector = ["numpy"]
 
 [project.scripts]
-mh = "maidenhead.cli:main"
+mh = "maidenhead.cli_native:main"
 mh_cli = "maidenhead.cli_native:main"
 
 [tool.setuptools]

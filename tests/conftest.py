@@ -1,116 +1,123 @@
+from __future__ import annotations
+
+import importlib.util
 import json
 import random
 import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
 
+
 ROOT = Path(__file__).resolve().parents[1]
-collect_ignore = [str(ROOT / "__init__.py")]
 SRC = ROOT / "src"
+
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
-if "maidenhead" in sys.modules:
-    mod = sys.modules["maidenhead"]
+
+def _load_native_extension() -> None:
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ""
+    if not ext_suffix:
+        return
+    native_so = ROOT / "src" / "maidenhead" / f"_native{ext_suffix}"
+    if not native_so.exists():
+        return
+    spec = importlib.util.spec_from_file_location("maidenhead._native", native_so)
+    if spec is None or spec.loader is None:
+        return
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except ImportError:
+        return
+    sys.modules["maidenhead._native"] = module
+
+_load_native_extension()
+
+mod = sys.modules.get("maidenhead")
+if mod is not None:
     mod_path = getattr(mod, "__file__", "")
-    if mod_path and not Path(mod_path).resolve().is_relative_to(SRC):
-        for name in list(sys.modules):
-            if name == "maidenhead" or name.startswith("maidenhead."):
-                sys.modules.pop(name, None)
+    if mod_path and "site-packages" in mod_path:
+        del sys.modules["maidenhead"]
 
 
-@pytest.fixture(scope="session")
-def locator_cases():
-    path = Path(__file__).with_name("locators.json")
-    with path.open(encoding="utf-8") as handle:
+def _load_locator_cases() -> dict:
+    path = ROOT / "tests" / "locators.json"
+    with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def _flatten_invalid_locators(invalid_locators):
-    if isinstance(invalid_locators, list):
-        return invalid_locators
-    if isinstance(invalid_locators, dict):
-        flattened = []
-        for values in invalid_locators.values():
-            flattened.extend(values)
-        return flattened
-    raise TypeError("invalid_locators must be a list or dict")
-
-
-def _flatten_valid_locators(valid_locators):
-    if isinstance(valid_locators, list):
-        return valid_locators
-    if isinstance(valid_locators, dict):
-        flattened = []
-        for length_map in valid_locators.values():
-            for values in length_map.values():
-                flattened.extend(values)
-        return flattened
-    raise TypeError("valid_locators must be a list or dict")
+@pytest.fixture(scope="session")
+def locator_cases() -> dict:
+    return _load_locator_cases()
 
 
 @pytest.fixture(scope="session")
-def valid_locators(locator_cases):
-    return _flatten_valid_locators(locator_cases["valid_locators"])
+def valid_locators(locator_cases: dict) -> list[str]:
+    out: list[str] = []
+    for length_map in locator_cases["valid_locators"].values():
+        for locs in length_map.values():
+            out.extend(locs)
+    return out
 
 
 @pytest.fixture(scope="session")
-def invalid_locators(locator_cases):
-    return _flatten_invalid_locators(locator_cases["invalid_locators"])
+def invalid_locator_groups(locator_cases: dict) -> dict:
+    return locator_cases["invalid_locators"]
 
 
 @pytest.fixture(scope="session")
-def valid_locator_groups(locator_cases):
-    valid_locators = locator_cases["valid_locators"]
-    if not isinstance(valid_locators, dict):
-        raise TypeError("valid_locators must be a dict for grouped access")
-    return valid_locators
+def invalid_locators(invalid_locator_groups: dict) -> list[str]:
+    out: list[str] = []
+    for locs in invalid_locator_groups.values():
+        out.extend(locs)
+    return out
 
 
 @pytest.fixture(scope="session")
-def invalid_locator_groups(locator_cases):
-    invalid_locators = locator_cases["invalid_locators"]
-    if not isinstance(invalid_locators, dict):
-        raise TypeError("invalid_locators must be a dict for grouped access")
-    return invalid_locators
-
-
-@pytest.fixture()
-def sample_valid_locators(valid_locator_groups):
-    def _sample(*, lengths=None, count=1, seed=0):
+def sample_valid_locators(valid_locators: list[str]):
+    def _sample(*, lengths: list[int] | None = None, seed: int = 0, count: int = 3) -> list[str]:
         rng = random.Random(seed)
-        lengths = lengths or sorted(valid_locator_groups.keys(), key=int)
-        out = []
+        locs = valid_locators
+        if lengths is None:
+            if not locs:
+                return []
+            if count >= len(locs):
+                return locs[:]
+            return rng.sample(locs, count)
+
+        # When lengths are provided, interpret count as "per length" to
+        # preserve older fixture behavior used by tests.
+        lengths_set = set(lengths)
+        candidates = [loc for loc in locs if len(loc) in lengths_set]
+        if not candidates:
+            return []
+        by_len: dict[int, list[str]] = {}
+        for loc in candidates:
+            by_len.setdefault(len(loc), []).append(loc)
+        out: list[str] = []
         for length in lengths:
-            length_map = valid_locator_groups[str(length)]
-            pool = []
-            for values in length_map.values():
-                pool.extend(values)
-            if not pool:
+            group = by_len.get(length, [])
+            if not group:
                 continue
-            if count >= len(pool):
-                out.extend(pool)
+            if count >= len(group):
+                out.extend(group)
             else:
-                out.extend(rng.sample(pool, count))
+                out.extend(rng.sample(group, count))
         return out
 
     return _sample
 
 
-@pytest.fixture()
-def sample_invalid_locators(invalid_locator_groups):
-    def _sample(*, categories=None, count=1, seed=0):
+@pytest.fixture(scope="session")
+def sample_invalid_locators(invalid_locators: list[str]):
+    def _sample(*, seed: int = 0, count: int = 1) -> list[str]:
         rng = random.Random(seed)
-        categories = categories or list(invalid_locator_groups.keys())
-        out = []
-        for category in categories:
-            pool = invalid_locator_groups[category]
-            if not pool:
-                continue
-            if count >= len(pool):
-                out.extend(pool)
-            else:
-                out.extend(rng.sample(pool, count))
-        return out
+        if not invalid_locators:
+            return []
+        if count >= len(invalid_locators):
+            return invalid_locators[:]
+        return rng.sample(invalid_locators, count)
 
     return _sample

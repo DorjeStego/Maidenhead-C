@@ -495,7 +495,7 @@ static int mh_cli_geojson_feature_collection(
 static void mh_cli_print_geojson_polygon(FILE *out, mh_bbox bbox) {
     fprintf(
         out,
-        "{\"type\":\"Polygon\",\"coordinates\":[[[%.15g,%.15g],[%.15g,%.15g],[%.15g,%.15g],[%.15g,%.15g],[%.15g,%.15g]]]}",
+        "{\"type\":\"Polygon\",\"coordinates\":[[[%.17g,%.17g],[%.17g,%.17g],[%.17g,%.17g],[%.17g,%.17g],[%.17g,%.17g]]]}",
         bbox.min_lon, bbox.min_lat,
         bbox.max_lon, bbox.min_lat,
         bbox.max_lon, bbox.max_lat,
@@ -505,7 +505,7 @@ static void mh_cli_print_geojson_polygon(FILE *out, mh_bbox bbox) {
 }
 
 static void mh_cli_print_geojson_bbox(FILE *out, const double bbox[4]) {
-    fprintf(out, "[%.15g,%.15g,%.15g,%.15g]", bbox[0], bbox[1], bbox[2], bbox[3]);
+    fprintf(out, "[%.17g,%.17g,%.17g,%.17g]", bbox[0], bbox[1], bbox[2], bbox[3]);
 }
 
 static void mh_cli_print_bbox_json(FILE *out, const mh_bbox *bbox) {
@@ -720,6 +720,10 @@ static int mh_cli_handle_center(int argc, char **argv, FILE *out, FILE *err) {
     if (batch_err != 0) {
         mh_cli_lines_free(&lines);
         return batch_err;
+    }
+
+    if (strcmp(format, "csv") == 0) {
+        csv = 1;
     }
 
     const char *sep = csv ? "," : " ";

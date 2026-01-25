@@ -6,6 +6,9 @@ from pathlib import Path
 
 
 def _native_cli_path() -> str:
+    env_path = os.environ.get("MAIDENHEAD_CLI_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
     base = Path(__file__).resolve().parent
     bin_dir = base / "bin"
     exe = "mh_cli.exe" if os.name == "nt" else "mh_cli"

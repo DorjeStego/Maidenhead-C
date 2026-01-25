@@ -6,6 +6,8 @@ from typing import Callable, Iterable, Iterator, List, Literal, Sequence, Tuple,
 
 try:
     from . import _native as _native_mh  # type: ignore
+    if not hasattr(_native_mh, "normalize"):
+        _native_mh = None
 except Exception:  # pragma: no cover - optional native module
     _native_mh = None
 

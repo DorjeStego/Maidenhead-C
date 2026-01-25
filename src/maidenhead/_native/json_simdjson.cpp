@@ -141,7 +141,23 @@ extern "C" PyObject *py_mh_json_loads(PyObject *self, PyObject *args) {
     return mh_simdjson_to_py(element);
 #else
     (void)self;
-    (void)obj;
-    return mh_missing_dep_error("native json parsing requires simdjson");
+    PyObject *json_mod = PyImport_ImportModule("json");
+    if (!json_mod) {
+        return mh_missing_dep_error("native json parsing requires simdjson");
+    }
+    PyObject *loads = PyObject_GetAttrString(json_mod, "loads");
+    Py_DECREF(json_mod);
+    if (!loads) {
+        return mh_missing_dep_error("native json parsing requires simdjson");
+    }
+    PyObject *call_args = PyTuple_Pack(1, obj);
+    if (!call_args) {
+        Py_DECREF(loads);
+        return NULL;
+    }
+    PyObject *result = PyObject_CallObject(loads, call_args);
+    Py_DECREF(call_args);
+    Py_DECREF(loads);
+    return result;
 #endif
 }

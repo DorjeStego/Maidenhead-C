@@ -15,6 +15,7 @@ set(MAIDENHEAD_NATIVE_SOURCES
     src/maidenhead/_native/geo.c
     src/maidenhead/_native/coverage.c
     src/maidenhead/_native/geojson.c
+    src/maidenhead/_native/json_simdjson.cpp
 )
 
 add_library(_native MODULE ${MAIDENHEAD_NATIVE_SOURCES})
