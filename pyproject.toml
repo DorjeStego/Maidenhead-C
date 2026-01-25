@@ -13,11 +13,10 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 urls = { "Repository" = "https://github.com/DorjeStego/Maidenhead" }
-dependencies = ["orjson", "pandas"]
+dependencies = ["orjson"]
 
 [project.optional-dependencies]
 geo = ["geographiclib"]
-vector = ["numpy"]
 
 [project.scripts]
 mh = "maidenhead.cli_native:main"

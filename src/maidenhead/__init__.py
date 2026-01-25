@@ -11,7 +11,7 @@ Public API is intentionally small:
 - neighborhood/topology helpers
 - basic geodesy helpers (distance/bearing/midpoint)
 
-Everything else is available from submodules (core, geo, vector, mh_types).
+Everything else is available from submodules (core, geo, mh_types).
 """
 
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -28,37 +28,10 @@ from .errors import MaidenheadError, InvalidLocatorError, OutOfRangeError, Preci
 from .mh_types import GridSquare
 
 # ---- Core API ----
-from .bulk import (
-    area_km2_many,
-    azimuth_many,
-    cell_size_deg_many,
-    cell_size_km_many,
-    cell_size_many,
-    children_many,
-    contains_many,
-    contains_point_many,
-    corners_many,
-    diagonal_km_many,
-    from_latlon_many,
-    neighbors_many,
-    normalize_many,
-    adjacent_many,
-    parent_many,
-    precision_many,
-    intersects_bbox_many,
-    intersects_polygon_many,
-    initial_bearing_many,
-    to_geojson_bbox_many,
-    to_geojson_envelope_many,
-    to_geojson_features_many,
-    to_geojson_feature_many,
-    to_geojson_polygon_many,
-    to_utm_zone_many,
-    split_bbox_many,
-    to_bbox_many,
-    to_center_many,
-    to_wkt_many,
-)
+from . import _native as _native_mh  # type: ignore
+
+if not hasattr(_native_mh, "normalize"):
+    raise ImportError("maidenhead native extension is required")
 from .core import (
     adjacent,
     azimuth,
@@ -115,11 +88,9 @@ __all__ = [
     "parse",
     "is_valid",
     "normalize",
-    "normalize_many",
     "precision_of",
     "from_latlon",
     "format_locator",
-    "from_latlon_many",
     "initial_bearing",
     "cell_size",
     "cell_size_deg",
@@ -131,31 +102,6 @@ __all__ = [
     "intersects_bbox",
     "intersects_polygon",
     "to_utm_zone",
-    "cell_size_many",
-    "cell_size_deg_many",
-    "cell_size_km_many",
-    "area_km2_many",
-    "diagonal_km_many",
-    "parent_many",
-    "children_many",
-    "to_wkt_many",
-    "azimuth_many",
-    "contains_point_many",
-    "contains_many",
-    "corners_many",
-    "split_bbox_many",
-    "neighbors_many",
-    "adjacent_many",
-    "precision_many",
-    "intersects_bbox_many",
-    "intersects_polygon_many",
-    "initial_bearing_many",
-    "to_utm_zone_many",
-    "to_geojson_polygon_many",
-    "to_geojson_feature_many",
-    "to_geojson_features_many",
-    "to_geojson_bbox_many",
-    "to_geojson_envelope_many",
     "to_center_latlon",
     "to_geojson_polygon",
     "to_geojson_feature",
@@ -163,12 +109,10 @@ __all__ = [
     "to_geojson_bbox",
     "to_geojson_envelope",
     "to_wkt",
-    "to_center_many",
     "to_bbox",
     "to_bbox_split",
     "split_bbox_list",
     "split_bbox",
-    "to_bbox_many",
     "corners",
     "azimuth",
     "adjacent",

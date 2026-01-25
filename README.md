@@ -11,7 +11,7 @@ Planned tag: `v1.0.0rc1`.
 ### 1.0.0rc1
 
 - Release candidate for 1.0 with expanded and stabilized API surface.
-- Adds comprehensive bulk and vectorized helpers (list, numpy, pandas).
+- Adds comprehensive native bulk operations.
 - Adds CLI parity for new API features, plus improved help output.
 - Adds GeoJSON/WKT support for locator and lat/lon inputs, including mixed inputs.
 - Improves antimeridian handling and adds polar-edge test coverage.
@@ -27,6 +27,8 @@ From a local package build (recommended to avoid PyPI name conflicts):
 Editable install for development:
 
 `python -m pip install -e .`
+
+Note: the native C extension is required. A working C toolchain is needed to build the package.
 
 ## Quickstart
 
@@ -99,29 +101,6 @@ Geodesy helpers:
 - `bearing_bin(a, b, bin_size=5)`
 - `azimuthal_sector(a, b, width_deg)`
 
-Bulk and vectorized APIs:
-
-- `maidenhead.bulk` provides list-based helpers like `from_latlon_many`, `to_bbox_many`.
-- `maidenhead.vector` provides numpy/pandas-aware helpers (Series in -> Series out).
-- Both bulk and vector helpers require equal-length inputs for paired operations and raise `ValueError` on mismatch.
-
-Bulk/vector output shapes (examples):
-
-- `from_latlon_many([lat...],[lon...])` -> `["IO83ri", "FN31pr"]`
-- `to_center_many(["IO83ri", "FN31pr"])` -> `[(lat, lon), (lat, lon)]`
-- `to_bbox_many(["IO83ri"])` -> `[(min_lat, min_lon, max_lat, max_lon)]`
-- `corners_many(["IO83ri"])` -> `[{"nw": (lat, lon), "ne": ..., "sw": ..., "se": ...}]`
-- `split_bbox_many(["RR00"])` -> `[[(min_lat, min_lon, max_lat, max_lon), (min_lat, min_lon, max_lat, max_lon)]]`
-- `to_geojson_polygon_many(["IO83ri"])` -> `[{"type": "Polygon", "coordinates": ...}]`
-- `to_geojson_feature_many(["IO83ri"])` -> `[{"type": "Feature", "geometry": ..., "properties": ...}]`
-- `to_geojson_features_many(["IO83ri"])` -> `[{"type": "Feature", ...}, ...]`
-- `to_geojson_bbox_many(["IO83ri"])` -> `[{"type": "Polygon", "bbox": ..., "coordinates": ...}]`
-- `to_wkt_many(["IO83ri"])` -> `["POLYGON ((...))"]`
-- `azimuth_many(["IO83ri"], ["FN31pr"])` -> `[(bearing_deg, distance_km)]`
-- `precision_many(["IO83ri"])` -> `[6]`
-
-Vectorized helpers in `maidenhead.vector` mirror the bulk names and return pandas Series when the inputs are Series; otherwise they return lists or numpy arrays depending on the input types.
-
 Exceptions:
 
 - `InvalidLocatorError`, `PrecisionError`, `OutOfRangeError` surface validation failures.
@@ -133,7 +112,6 @@ Core:
 - `MaidenheadError`: base exception for library errors. Example: `except MaidenheadError: ...`
 - `parse`: parse a locator into a `GridSquare`. Example: `parse("IO83ri").precision`
 - `is_valid`: boolean validation. Example: `is_valid("IO83")`
-- `normalize_many`: normalize a list of locators. Example: `normalize_many(["io83ri", "fn31pr"])`
 - `to_bbox_split`: split a locator bbox across the dateline. Example: `to_bbox_split("RR00")`
 
 Cell metrics:
@@ -150,43 +128,13 @@ Coverage:
 
 Bulk list helpers (list in, list out):
 
-- `cell_size_many`: `cell_size_many(["IO83ri", "FN31pr"], unit="km")`
-- `cell_size_deg_many`: `cell_size_deg_many(["IO83ri", "FN31pr"])`
-- `cell_size_km_many`: `cell_size_km_many(["IO83ri", "FN31pr"])`
-- `area_km2_many`: `area_km2_many(["IO83ri", "FN31pr"])`
-- `diagonal_km_many`: `diagonal_km_many(["IO83ri", "FN31pr"])`
-- `parent_many`: `parent_many(["IO83ri", "FN31pr"], precision=4)`
-- `children_many`: `children_many(["IO83ri"], precision=8)`
-- `to_wkt_many`: `to_wkt_many(["IO83ri", "FN31pr"])`
-- `azimuth_many`: `azimuth_many(["IO83ri"], ["FN31pr"])`
-- `contains_point_many`: `contains_point_many(["IO83ri"], [(53.1, -3.9)])`
-- `contains_many`: `contains_many(["IO83ri"], ["IO83rj"])`
-- `corners_many`: `corners_many(["IO83ri", "FN31pr"])`
-- `split_bbox_many`: `split_bbox_many(["RR00", "IO83ri"])`
-- `neighbors_many`: `neighbors_many(["IO83ri", "FN31pr"])`
-- `adjacent_many`: `adjacent_many(["IO83ri"])`
-- `precision_many`: `precision_many(["IO83ri", "FN31pr"])`
-- `intersects_bbox_many`: `intersects_bbox_many(["IO83ri"], [(-1, -2, 1, 2)])`
-- `intersects_polygon_many`: `intersects_polygon_many(["IO83ri"], [[[0, 0], [1, 0], [1, 1], [0, 1]]])`
-- `initial_bearing_many`: `initial_bearing_many(["IO83ri"], ["FN31pr"])`
-- `to_utm_zone_many`: `to_utm_zone_many(["IO83ri", "FN31pr"])`
-- `to_geojson_polygon_many`: `to_geojson_polygon_many(["IO83ri", "FN31pr"])`
-- `to_geojson_feature_many`: `to_geojson_feature_many(["IO83ri", "FN31pr"])`
-- `to_geojson_features_many`: `to_geojson_features_many(["IO83ri", "FN31pr"])`
-- `to_geojson_bbox_many`: `to_geojson_bbox_many(["IO83ri", "FN31pr"])`
-- `to_geojson_envelope_many`: `to_geojson_envelope_many(["IO83ri", "FN31pr"])`
-- `to_center_many`: `to_center_many(["IO83ri", "FN31pr"])`
-
-Optional dependencies:
 
 Required dependencies:
 
-- `pandas`: vectorized Series helpers in `maidenhead.vector`.
 - `orjson`: JSON output in CLI and GeoJSON helpers.
 
 Optional dependencies:
 
-- `numpy`: vectorized numeric outputs in `maidenhead.vector`.
 - `geographiclib`: geodesic distance and area calculations.
 
 ## Maidenhead CLI (mh)
@@ -509,28 +457,6 @@ Great-circle midpoint between A and B.
 - `mh midpoint 40.4168,-3.7038 55.7558,37.6173`
 - `mh midpoint RF82ib JP12fk --csv`
 
-#### bulk
-
-Bulk operations for locators/latlon.
-
-- `mh bulk normalize --stdin`
-- `mh bulk from-latlon --file coords.txt --format json`
-- `mh bulk center --stdin --format csv`
-- `mh bulk bbox --stdin --format json`
-- `mh bulk size --stdin --unit km --format csv`
-- `mh bulk geojson --stdin --geojson-format featurecollection --format json`
-
-Batch input:
-
-- locators: one per line
-- lat/lon: "lat lon" or "lat,lon" (comma+space accepted)
-
-Supported ops:
-
-normalize, from-latlon, center, bbox, wkt, contains-point, contains,
-intersects-bbox, intersects-polygon, azimuth, initial-bearing, neighbors,
-adjacent, corners, precision, parent, children, size, area, diagonal, utm,
-geojson, bbox-split, bbox-split-list
 
 ### Global Options
 

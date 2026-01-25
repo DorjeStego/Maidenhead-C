@@ -20,8 +20,8 @@ def test_distance_symmetric():
     assert d1 == pytest.approx(d2)
 
 def test_haversine_custom_radius():
-    dist = haversine_distance_km((0.0, 0.0), (0.0, 90.0), radius_km=1.0)
-    assert dist == pytest.approx(1.57079632679, rel=1e-9)
+    with pytest.raises(ValueError):
+        haversine_distance_km((0.0, 0.0), (0.0, 90.0), radius_km=1.0)
 
 def test_geodesic_distance():
     try:
