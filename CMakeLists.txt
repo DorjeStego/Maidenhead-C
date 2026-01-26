@@ -15,6 +15,7 @@ find_package(Python COMPONENTS Interpreter Development.Module Development REQUIR
 set(MAIDENHEAD_NATIVE_SOURCES
     src/maidenhead/_native/maidenhead_native.c
     src/maidenhead/_native/core.c
+    src/maidenhead/_native/core_utils.c
     src/maidenhead/_native/geo.c
     src/maidenhead/_native/coverage.c
     src/maidenhead/_native/geojson.c
@@ -45,8 +46,16 @@ target_compile_definitions(_native PRIVATE MH_HAVE_SIMDJSON=1)
 add_executable(
     mh_cli
     src/maidenhead/_native/cli.c
+    src/maidenhead/_native/cli_bulk.c
+    src/maidenhead/_native/cli_core_ops.c
+    src/maidenhead/_native/cli_cover_ops.c
+    src/maidenhead/_native/cli_geo_ops.c
     src/maidenhead/_native/cli_main.c
+    src/maidenhead/_native/cli_commands.c
+    src/maidenhead/_native/cli_spatial_ops.c
+    src/maidenhead/_native/cli_utils.c
     src/maidenhead/_native/core.c
+    src/maidenhead/_native/core_utils.c
     src/maidenhead/_native/geo.c
     src/maidenhead/_native/coverage.c
     src/maidenhead/_native/geojson.c
