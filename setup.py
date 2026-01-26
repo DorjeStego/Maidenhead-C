@@ -9,6 +9,10 @@ from setuptools.command.build_py import build_py as _build_py
 from setuptools.command.build_ext import build_ext as _build_ext
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
+SCRIPTS_DIR = "Scripts" if os.name == "nt" else "bin"
+CLI_STAGING_DIR = os.path.join(ROOT, "build", "mh_cli_staging")
+CLI_EXE_NAME = "mh_cli.exe" if os.name == "nt" else "mh_cli"
+CLI_MH_NAME = "mh.exe" if os.name == "nt" else "mh"
 
 native_sources = [
     "src/maidenhead/_native/maidenhead_native.c",
@@ -109,7 +113,7 @@ class build_py(_build_py):
         os.makedirs(build_dir, exist_ok=True)
         subprocess.check_call([cmake, "-S", ROOT, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release"])
         subprocess.check_call([cmake, "--build", build_dir, "--target", "mh_cli", "-j", "2", "--clean-first"])
-        exe_name = "mh_cli.exe" if os.name == "nt" else "mh_cli"
+        exe_name = CLI_EXE_NAME
         src_bin = os.path.join(build_dir, exe_name)
         if not os.path.exists(src_bin):
             print("mh_cli not produced; skipping copy")
@@ -122,6 +126,17 @@ class build_py(_build_py):
         shutil.copy2(src_bin, dest_bin)
         if os.name != "nt":
             os.chmod(dest_bin, 0o755)
+        self._stage_cli_scripts(src_bin)
+
+    def _stage_cli_scripts(self, src_bin: str) -> None:
+        os.makedirs(CLI_STAGING_DIR, exist_ok=True)
+        mh_cli_path = os.path.join(CLI_STAGING_DIR, CLI_EXE_NAME)
+        mh_path = os.path.join(CLI_STAGING_DIR, CLI_MH_NAME)
+        shutil.copy2(src_bin, mh_cli_path)
+        shutil.copy2(src_bin, mh_path)
+        if os.name != "nt":
+            os.chmod(mh_cli_path, 0o755)
+            os.chmod(mh_path, 0o755)
 
 class build_ext(_build_ext):
     def run(self):
@@ -154,4 +169,9 @@ class build_ext(_build_ext):
         os.makedirs(dest_dir, exist_ok=True)
         shutil.copy2(src_so, os.path.join(dest_dir, os.path.basename(src_so)))
 
-setup(ext_modules=ext_modules, cmdclass={"build_py": build_py, "build_ext": build_ext})
+setup(
+    ext_modules=ext_modules,
+    cmdclass={"build_py": build_py, "build_ext": build_ext},
+    data_files=[(SCRIPTS_DIR, [os.path.join(CLI_STAGING_DIR, CLI_MH_NAME),
+                              os.path.join(CLI_STAGING_DIR, CLI_EXE_NAME)])],
+)

@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 import pytest
@@ -899,8 +900,14 @@ def _find_native_cli() -> Path | None:
     candidates: list[Path] = []
     if env_path:
         candidates.append(Path(env_path))
+    for name in ("mh", "mh_cli"):
+        resolved = shutil.which(name)
+        if resolved:
+            candidates.append(Path(resolved))
     candidates.extend(
         [
+            ROOT / "build" / "mh_cli_staging" / "mh",
+            ROOT / "build" / "mh_cli_staging" / "mh_cli",
             ROOT / "cmake-build-native-313" / "mh_cli",
             ROOT / "cmake-build-debug" / "mh_cli",
             ROOT / "cmake-build-default" / "mh_cli",
@@ -914,22 +921,15 @@ def _find_native_cli() -> Path | None:
     return max(valid, key=lambda p: p.stat().st_mtime)
 
 
-def _cli_env() -> dict[str, str]:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = f"{SRC}:{env.get('PYTHONPATH', '')}"
-    native_cli = _find_native_cli()
-    if native_cli is not None:
-        env["MAIDENHEAD_CLI_PATH"] = str(native_cli)
-    return env
-
-
 def _run_cli(args: list[str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    cli_path = _find_native_cli()
+    if cli_path is None:
+        raise RuntimeError("native CLI not found; set MAIDENHEAD_CLI_PATH or build mh_cli")
     return subprocess.run(
-        [sys.executable, "-m", "maidenhead.cli_native", *args],
+        [str(cli_path), *args],
         input=stdin,
         text=True,
         capture_output=True,
-        env=_cli_env(),
     )
 
 

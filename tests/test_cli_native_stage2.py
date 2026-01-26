@@ -1,52 +1,46 @@
+import json
 import os
+import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-try:
-    import orjson  # type: ignore
-except Exception:
-    orjson = None
-
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
 
 
 def _find_native_cli() -> Path | None:
     env_path = os.environ.get("MAIDENHEAD_CLI_PATH")
-    candidates = []
+    candidates: list[Path] = []
     if env_path:
         candidates.append(Path(env_path))
+    for name in ("mh", "mh_cli"):
+        resolved = shutil.which(name)
+        if resolved:
+            candidates.append(Path(resolved))
     candidates.extend(
         [
+            ROOT / "build" / "mh_cli_staging" / "mh",
+            ROOT / "build" / "mh_cli_staging" / "mh_cli",
             ROOT / "cmake-build-debug" / "mh_cli",
             ROOT / "cmake-build-default" / "mh_cli",
         ]
     )
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
-    return None
-
-
-def _cli_env() -> dict[str, str]:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = f"{SRC}:{env.get('PYTHONPATH', '')}"
-    native_cli = _find_native_cli()
-    if native_cli is not None:
-        env["MAIDENHEAD_CLI_PATH"] = str(native_cli)
-    return env
+    valid = [path for path in candidates if path.is_file() and os.access(path, os.X_OK)]
+    if not valid:
+        return None
+    return max(valid, key=lambda p: p.stat().st_mtime)
 
 
 def _run_cli(args: list[str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    cli_path = _find_native_cli()
+    if cli_path is None:
+        raise RuntimeError("native CLI not found; set MAIDENHEAD_CLI_PATH or build mh_cli")
     return subprocess.run(
-        [sys.executable, "-m", "maidenhead.cli_native", *args],
+        [str(cli_path), *args],
         input=stdin,
         text=True,
         capture_output=True,
-        env=_cli_env(),
     )
 
 
@@ -110,7 +104,6 @@ def test_native_cli_stage2(args: list[str]) -> None:
     assert proc.stdout.strip()
 
 
-@pytest.mark.skipif(orjson is None, reason="orjson not available")
 @pytest.mark.parametrize(
     "args",
     [
@@ -127,15 +120,13 @@ def test_native_cli_geojson(args: list[str]) -> None:
     assert proc.returncode == 0, proc.stderr
     payload = proc.stdout.strip()
     assert payload
-    orjson.loads(payload)
+    json.loads(payload)
 
 
 def test_native_cli_geojson_batch_featurecollection() -> None:
-    if orjson is None:
-        pytest.skip("orjson not available")
     stdin = "IO83ri\nJN18ev\n"
     args = ["geojson", "--stdin", "--geojson-format", "featurecollection"]
     proc = _run_cli(args, stdin=stdin)
     assert proc.returncode == 0, proc.stderr
-    out = orjson.loads(proc.stdout.strip())
+    out = json.loads(proc.stdout.strip())
     assert out["type"] == "FeatureCollection"

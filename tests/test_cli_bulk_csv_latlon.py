@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 import pytest
@@ -333,8 +334,14 @@ def _find_native_cli() -> Path | None:
     env_path = os.environ.get("MAIDENHEAD_CLI_PATH")
     if env_path:
         candidates.append(Path(env_path))
+    for name in ("mh", "mh_cli"):
+        resolved = shutil.which(name)
+        if resolved:
+            candidates.append(Path(resolved))
     candidates.extend(
         [
+            ROOT / "build" / "mh_cli_staging" / "mh",
+            ROOT / "build" / "mh_cli_staging" / "mh_cli",
             ROOT / "cmake-build-native-313" / "mh_cli",
             ROOT / "cmake-build-debug" / "mh_cli",
             ROOT / "cmake-build-default" / "mh_cli",
@@ -348,22 +355,15 @@ def _find_native_cli() -> Path | None:
     return max(valid, key=lambda p: p.stat().st_mtime)
 
 
-def _cli_env() -> dict[str, str]:
-    env = os.environ.copy()
-    env["PYTHONPATH"] = f"{SRC}:{env.get('PYTHONPATH', '')}"
-    native_cli = _find_native_cli()
-    if native_cli is not None:
-        env["MAIDENHEAD_CLI_PATH"] = str(native_cli)
-    return env
-
-
 def _run_cli(args: list[str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    cli_path = _find_native_cli()
+    if cli_path is None:
+        raise RuntimeError("native CLI not found; set MAIDENHEAD_CLI_PATH or build mh_cli")
     return subprocess.run(
-        [sys.executable, "-m", "maidenhead.cli_native", *args],
+        [str(cli_path), *args],
         input=stdin,
         text=True,
         capture_output=True,
-        env=_cli_env(),
     )
 
 
@@ -438,10 +438,12 @@ def test_bulk_from_latlon_csv_values(tmp_path):
     assert header == ["input_lat", "input_lon", "locator"]
     assert len(data) == len(LATLON_LINES)
     for row, line in zip(data, LATLON_LINES):
-        lat, lon = _parse_latlon(line)
+        lat_text, lon_text = line.split(",", 1)
+        lat = float(lat_text)
+        lon = float(lon_text)
         expected = core.from_latlon(lat, lon, precision=6)
-        assert row[0] == lat_text
-        assert row[1] == lon_text
+        assert float(row[0]) == pytest.approx(lat, abs=1e-9)
+        assert float(row[1]) == pytest.approx(lon, abs=1e-9)
         assert row[2] == expected.locator
 
 

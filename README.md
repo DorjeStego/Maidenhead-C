@@ -324,7 +324,7 @@ Notes:
 - Mixed inputs are supported for `feature` and `featurecollection` outputs.
 - `--split outputs` antimeridian-safe geometry for bbox/envelope formats.
 - Batch GeoJSON requires `--geojson-format featurecollection`.
-- JSON output uses orjson (install with pip install orjson).
+- JSON output is produced natively in C; no Python JSON dependency is required for the CLI.
 
 #### wkt
 

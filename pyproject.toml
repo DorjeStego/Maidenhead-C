@@ -13,14 +13,10 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 urls = { "Repository" = "https://github.com/DorjeStego/Maidenhead" }
-dependencies = ["orjson"]
+dependencies = []
 
 [project.optional-dependencies]
 geo = ["geographiclib"]
-
-[project.scripts]
-mh = "maidenhead.cli_native:main"
-mh_cli = "maidenhead.cli_native:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
