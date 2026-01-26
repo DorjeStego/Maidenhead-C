@@ -15,6 +15,7 @@ find_package(Python COMPONENTS Interpreter Development.Module Development REQUIR
 set(MAIDENHEAD_NATIVE_SOURCES
     src/maidenhead/_native/maidenhead_native.c
     src/maidenhead/_native/core.c
+    src/maidenhead/_native/core_simd.c
     src/maidenhead/_native/core_utils.c
     src/maidenhead/_native/geo.c
     src/maidenhead/_native/coverage.c
@@ -55,6 +56,7 @@ add_executable(
     src/maidenhead/_native/cli_spatial_ops.c
     src/maidenhead/_native/cli_utils.c
     src/maidenhead/_native/core.c
+    src/maidenhead/_native/core_simd.c
     src/maidenhead/_native/core_utils.c
     src/maidenhead/_native/geo.c
     src/maidenhead/_native/coverage.c
