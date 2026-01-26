@@ -5934,7 +5934,7 @@ int mh_cli_main_io(int argc, char **argv, FILE *out, FILE *err) {
         return 0;
     }
     if (strcmp(argv[1], "--version") == 0) {
-        fprintf(out, "mh 1.0.0rc2-002\n");
+        fprintf(out, "mh 1.0.0rc2-003\n");
         return 0;
     }
     if (strcmp(argv[1], "normalize") == 0) {
