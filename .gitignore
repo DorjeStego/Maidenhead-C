@@ -20,6 +20,7 @@
 *.tar
 *.zip
 *.tar.*
+cmake-build-native-313/*
 
 # Logs and databases #
 ######################

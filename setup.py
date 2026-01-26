@@ -9,6 +9,10 @@ from setuptools.command.build_py import build_py as _build_py
 from setuptools.command.build_ext import build_ext as _build_ext
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
+SCRIPTS_DIR = "Scripts" if os.name == "nt" else "bin"
+CLI_STAGING_DIR = os.path.join(ROOT, "build", "mh_cli_staging")
+CLI_EXE_NAME = "mh_cli.exe" if os.name == "nt" else "mh_cli"
+CLI_MH_NAME = "mh.exe" if os.name == "nt" else "mh"
 
 native_sources = [
     "src/maidenhead/_native/maidenhead_native.c",
@@ -25,15 +29,15 @@ define_macros = []
 extra_compile_args = []
 language = None
 
-geo_root = os.environ.get("GEOGRAPHICLIB_DIR")
-if geo_root:
-    include_dirs.append(os.path.join(geo_root, "include"))
-    library_dirs.append(os.path.join(geo_root, "lib"))
-
 simdjson_root = os.environ.get("SIMDJSON_DIR")
 if simdjson_root:
     include_dirs.append(os.path.join(simdjson_root, "include"))
     library_dirs.append(os.path.join(simdjson_root, "lib"))
+
+sleef_root = os.environ.get("SLEEF_DIR")
+if sleef_root:
+    include_dirs.append(os.path.join(sleef_root, "include"))
+    library_dirs.append(os.path.join(sleef_root, "lib"))
 
 conda_prefix = os.environ.get("CONDA_PREFIX")
 if conda_prefix:
@@ -43,19 +47,6 @@ if conda_prefix:
 # Fallback to the active Python prefix for build-isolation cases.
 include_dirs.append(os.path.join(sys.prefix, "include"))
 library_dirs.append(os.path.join(sys.prefix, "lib"))
-
-lib_geo = find_library("GeographicLib")
-geo_header = None
-for inc in include_dirs:
-    candidate = os.path.join(inc, "GeographicLib", "Geodesic.hpp")
-    if os.path.exists(candidate):
-        geo_header = candidate
-        break
-if lib_geo and geo_header:
-    native_sources.append("src/maidenhead/_native/geo_geodesic.cpp")
-    libraries.append("GeographicLib")
-    define_macros.append(("MH_HAVE_GEODESIC", "1"))
-    language = "c++"
 
 lib_simdjson = find_library("simdjson")
 simdjson_header = None
@@ -70,6 +61,19 @@ if simdjson_available:
     libraries.append("simdjson")
     define_macros.append(("MH_HAVE_SIMDJSON", "1"))
     language = "c++"
+
+lib_sleef = find_library("sleef")
+sleef_header = None
+for inc in include_dirs + ["/usr/include", "/usr/local/include"]:
+    candidate = os.path.join(inc, "sleef.h")
+    if os.path.exists(candidate):
+        sleef_header = candidate
+        break
+sleef_available = bool(lib_sleef and sleef_header)
+if sleef_available:
+    libraries.append("sleef")
+    define_macros.append(("MH_HAVE_SIMD_MATH", "1"))
+    # SLEEF is a SIMD math backend; the geodesic SIMD hooks remain opt-in at runtime.
 
 if language == "c++" and os.name != "nt":
     # Avoid passing C++ flags to C sources; rely on compiler default for C++.
@@ -109,7 +113,7 @@ class build_py(_build_py):
         os.makedirs(build_dir, exist_ok=True)
         subprocess.check_call([cmake, "-S", ROOT, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release"])
         subprocess.check_call([cmake, "--build", build_dir, "--target", "mh_cli", "-j", "2", "--clean-first"])
-        exe_name = "mh_cli.exe" if os.name == "nt" else "mh_cli"
+        exe_name = CLI_EXE_NAME
         src_bin = os.path.join(build_dir, exe_name)
         if not os.path.exists(src_bin):
             print("mh_cli not produced; skipping copy")
@@ -122,6 +126,17 @@ class build_py(_build_py):
         shutil.copy2(src_bin, dest_bin)
         if os.name != "nt":
             os.chmod(dest_bin, 0o755)
+        self._stage_cli_scripts(src_bin)
+
+    def _stage_cli_scripts(self, src_bin: str) -> None:
+        os.makedirs(CLI_STAGING_DIR, exist_ok=True)
+        mh_cli_path = os.path.join(CLI_STAGING_DIR, CLI_EXE_NAME)
+        mh_path = os.path.join(CLI_STAGING_DIR, CLI_MH_NAME)
+        shutil.copy2(src_bin, mh_cli_path)
+        shutil.copy2(src_bin, mh_path)
+        if os.name != "nt":
+            os.chmod(mh_cli_path, 0o755)
+            os.chmod(mh_path, 0o755)
 
 class build_ext(_build_ext):
     def run(self):
@@ -135,6 +150,10 @@ class build_ext(_build_ext):
         python_bin = preferred_python if os.path.exists(preferred_python) else sys.executable
         env = os.environ.copy()
         env["PYTHON_BIN"] = python_bin
+        if sleef_available:
+            env.setdefault("WITH_SLEEF_SIMD", "1")
+        if env.get("EMIT_ASM"):
+            env.setdefault("EMIT_ASM", env["EMIT_ASM"])
         subprocess.check_call([script], env=env, cwd=ROOT)
 
         # Stage the CMake-built extension into the build output directory.
@@ -150,4 +169,9 @@ class build_ext(_build_ext):
         os.makedirs(dest_dir, exist_ok=True)
         shutil.copy2(src_so, os.path.join(dest_dir, os.path.basename(src_so)))
 
-setup(ext_modules=ext_modules, cmdclass={"build_py": build_py, "build_ext": build_ext})
+setup(
+    ext_modules=ext_modules,
+    cmdclass={"build_py": build_py, "build_ext": build_ext},
+    data_files=[(SCRIPTS_DIR, [os.path.join(CLI_STAGING_DIR, CLI_MH_NAME),
+                              os.path.join(CLI_STAGING_DIR, CLI_EXE_NAME)])],
+)

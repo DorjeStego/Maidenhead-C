@@ -131,11 +131,15 @@ Bulk list helpers (list in, list out):
 
 Required dependencies:
 
-- `orjson`: JSON output in CLI and GeoJSON helpers.
+- `simdjson` (system library + headers): required for the native extension build.
 
 Optional dependencies:
 
-- `geographiclib`: geodesic distance and area calculations.
+- `SLEEF` (system library + headers): enables SIMD math backend for geodesic bulk hooks.
+  - Arch/manual install note:
+    - Ensure `sleef.h` exists at `$SLEEF_DIR/include/sleef.h`
+    - Ensure the library exists at `$SLEEF_DIR/lib/libsleef.so` (or `.a`)
+    - Example: `SLEEF_DIR=$HOME/.local WITH_SLEEF_SIMD=1 python -m build --wheel`
 
 ## Maidenhead CLI (mh)
 
@@ -320,7 +324,7 @@ Notes:
 - Mixed inputs are supported for `feature` and `featurecollection` outputs.
 - `--split outputs` antimeridian-safe geometry for bbox/envelope formats.
 - Batch GeoJSON requires `--geojson-format featurecollection`.
-- JSON output uses orjson (install with pip install orjson).
+- JSON output is produced natively in C; no Python JSON dependency is required for the CLI.
 
 #### wkt
 

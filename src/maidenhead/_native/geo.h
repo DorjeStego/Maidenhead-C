@@ -61,7 +61,7 @@ mh_status mh_azimuthal_sector(
     mh_error_context *err
 );
 
-/* Optional geodesic APIs (GeographicLib) */
+/* In-built geodesic APIs (WGS84 Vincenty/authalic fallbacks) */
 
 mh_status mh_geodesic_distance_km(
     const mh_point *a,
@@ -88,6 +88,24 @@ mh_status mh_geodesic_line_point(
     const mh_point *a,
     const mh_point *b,
     double fraction,
+    mh_point *out,
+    mh_error_context *err
+);
+
+/* Bulk geodesic helpers with SIMD-ready hooks. */
+mh_status mh_geodesic_distance_many(
+    const mh_point *a,
+    const mh_point *b,
+    size_t n,
+    double *out_km,
+    mh_error_context *err
+);
+
+mh_status mh_geodesic_line_points_many(
+    const mh_point *a,
+    const mh_point *b,
+    const double *fractions,
+    size_t n,
     mh_point *out,
     mh_error_context *err
 );

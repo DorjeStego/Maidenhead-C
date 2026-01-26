@@ -6,6 +6,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(WITH_SLEEF_SIMD "Enable SIMD math backend via SLEEF" OFF)
+option(EMIT_ASM "Emit assembly alongside objects (-save-temps=obj)" OFF)
+
 # Build the CPython extension module for CLion builds.
 find_package(Python COMPONENTS Interpreter Development.Module Development REQUIRED)
 
@@ -60,19 +63,38 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(mh_cli PRIVATE m)
 endif()
 
-find_package(GeographicLib QUIET)
-if(GeographicLib_FOUND)
-    target_sources(_native PRIVATE src/maidenhead/_native/geo_geodesic.cpp)
-    target_compile_definitions(_native PRIVATE MH_HAVE_GEODESIC=1)
-    target_sources(mh_cli PRIVATE src/maidenhead/_native/geo_geodesic.cpp)
-    target_compile_definitions(mh_cli PRIVATE MH_HAVE_GEODESIC=1)
-    if(TARGET GeographicLib::GeographicLib)
-        target_link_libraries(_native PRIVATE GeographicLib::GeographicLib)
-        target_link_libraries(mh_cli PRIVATE GeographicLib::GeographicLib)
-    else()
-        target_link_libraries(_native PRIVATE GeographicLib)
-        target_link_libraries(mh_cli PRIVATE GeographicLib)
+if(EMIT_ASM)
+    foreach(_tgt IN ITEMS _native mh_cli)
+        target_compile_options(
+            ${_tgt}
+            PRIVATE
+                $<$<C_COMPILER_ID:GNU,Clang>:-save-temps=obj>
+                $<$<CXX_COMPILER_ID:GNU,Clang>:-save-temps=obj>
+        )
+    endforeach()
+endif()
+
+if(WITH_SLEEF_SIMD)
+    set(SLEEF_HINT $ENV{SLEEF_DIR})
+    find_path(
+        SLEEF_INCLUDE_DIR sleef.h
+        HINTS ${SLEEF_HINT}
+        PATH_SUFFIXES include
+    )
+    find_library(
+        SLEEF_LIBRARY sleef
+        HINTS ${SLEEF_HINT}
+        PATH_SUFFIXES lib lib64
+    )
+    if(NOT SLEEF_INCLUDE_DIR OR NOT SLEEF_LIBRARY)
+        message(FATAL_ERROR "WITH_SLEEF_SIMD=ON but sleef not found")
     endif()
+    target_include_directories(_native PRIVATE ${SLEEF_INCLUDE_DIR})
+    target_include_directories(mh_cli PRIVATE ${SLEEF_INCLUDE_DIR})
+    target_link_libraries(_native PRIVATE ${SLEEF_LIBRARY})
+    target_link_libraries(mh_cli PRIVATE ${SLEEF_LIBRARY})
+    target_compile_definitions(_native PRIVATE MH_HAVE_SIMD_MATH=1)
+    target_compile_definitions(mh_cli PRIVATE MH_HAVE_SIMD_MATH=1)
 endif()
 
 # Ensure the extension has the correct suffix and no "lib" prefix.

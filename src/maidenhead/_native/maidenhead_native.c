@@ -3238,7 +3238,7 @@ static PyMethodDef maidenhead_native_methods[] = {
     {"great_circle_path", (PyCFunction)py_mh_great_circle_path, METH_VARARGS | METH_KEYWORDS, "Great-circle path points."},
     {"bearing_bin", (PyCFunction)py_mh_bearing_bin, METH_VARARGS | METH_KEYWORDS, "Bearing bin start angle."},
     {"azimuthal_sector", (PyCFunction)py_mh_azimuthal_sector, METH_VARARGS | METH_KEYWORDS, "Azimuthal sector from A to B."},
-    {"geodesic_midpoint", py_mh_geodesic_midpoint, METH_VARARGS, "Geodesic midpoint (requires GeographicLib)."},
+    {"geodesic_midpoint", py_mh_geodesic_midpoint, METH_VARARGS, "Geodesic midpoint (native WGS84)."},
     {"cover_circle", (PyCFunction)py_mh_cover_circle, METH_VARARGS | METH_KEYWORDS, "Cover circle with grid squares."},
     {"cover_line", (PyCFunction)py_mh_cover_line, METH_VARARGS | METH_KEYWORDS, "Cover line with grid squares."},
     {"json_loads", py_mh_json_loads, METH_VARARGS, "Parse JSON using simdjson when available."},
