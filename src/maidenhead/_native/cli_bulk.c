@@ -171,9 +171,7 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
         if (strcmp(format, "json") == 0) {
             mh_cli_json_bulk_end(out);
         }
-        if (strcmp(format, "csv") != 0) {
-            fputc('\n', out);
-        }
+        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -276,9 +274,7 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
         if (strcmp(format, "json") == 0) {
             mh_cli_json_bulk_end(out);
         }
-        if (strcmp(format, "csv") != 0) {
-            fputc('\n', out);
-        }
+        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -316,9 +312,7 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
         if (strcmp(format, "json") == 0) {
             mh_cli_json_bulk_end(out);
         }
-        if (strcmp(format, "csv") != 0) {
-            fputc('\n', out);
-        }
+        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -401,9 +395,7 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
         if (strcmp(format, "json") == 0) {
             mh_cli_json_bulk_end(out);
         }
-        if (strcmp(format, "csv") != 0) {
-            fputc('\n', out);
-        }
+        fputc('\n', out);
         mh_cli_lines_free(&lines);
         return 0;
     }
@@ -784,7 +776,7 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
             } else if (strcmp(format, "csv") == 0) {
                 fprintf(
                     out,
-                    "%s,%s,%.*f,%.*f,%.*f%s",
+                    "%s,%s,%.*f,%.*f,%.*f\n",
                     tokens.items[0],
                     tokens.items[1],
                     digits,
@@ -792,8 +784,7 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                     digits,
                     min_km,
                     digits,
-                    max_km,
-                    i + 1 < lines.length ? "\n" : ""
+                    max_km
                 );
             } else {
                 fprintf(
@@ -827,14 +818,13 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
                 } else if (strcmp(format, "csv") == 0) {
                     fprintf(
                         out,
-                        "%s,%s,%.*f,%.*f%s",
+                        "%s,%s,%.*f,%.*f\n",
                         tokens.items[0],
                         tokens.items[1],
                         digits,
                         bearing,
                         digits,
-                        dist,
-                        i + 1 < lines.length ? "\n" : ""
+                        dist
                     );
                 } else {
                     fprintf(out, "%.*f %.*f%s", digits, bearing, digits, dist, i + 1 < lines.length ? "\n" : "");
@@ -1927,4 +1917,3 @@ int mh_cli_handle_bulk(int argc, char **argv, FILE *out, FILE *err) {
     mh_cli_print_error(err, "unknown bulk operation");
     return 2;
 }
-
