@@ -35,14 +35,17 @@ def _find_native_cli() -> Path | None:
         candidates.append(Path(env_path))
     candidates.extend(
         [
+            ROOT / "cmake-build-native-313" / "mh_cli",
             ROOT / "cmake-build-debug" / "mh_cli",
             ROOT / "cmake-build-default" / "mh_cli",
         ]
     )
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return path
-    return None
+    candidates.extend(Path(path) for path in ROOT.glob("cmake-build-native-*/mh_cli"))
+    candidates.extend(Path(path) for path in ROOT.glob("build/temp.*/*/mh_cli"))
+    valid = [path for path in candidates if path.is_file() and os.access(path, os.X_OK)]
+    if not valid:
+        return None
+    return max(valid, key=lambda p: p.stat().st_mtime)
 
 
 def _cli_env() -> dict[str, str]:
@@ -131,7 +134,9 @@ def test_cli_center_csv(sample_valid_locators):
     proc = _run_cli(["center", loc, "--digits", "4", "--csv"])
     assert proc.returncode == 0
     lat, lon = to_center_latlon(loc)
-    out_lat, out_lon = [float(v) for v in proc.stdout.strip().split(",")]
+    lines = proc.stdout.strip().splitlines()
+    assert lines[0] == "input,lat,lon"
+    out_lat, out_lon = [float(v) for v in lines[1].split(",")[1:]]
     assert out_lat == pytest.approx(round(lat, 4))
     assert out_lon == pytest.approx(round(lon, 4))
 
@@ -141,7 +146,9 @@ def test_cli_bbox_csv(sample_valid_locators):
     proc = _run_cli(["bbox", loc, "--digits", "4", "--csv"])
     assert proc.returncode == 0
     min_lat, min_lon, max_lat, max_lon = to_bbox(loc)
-    out_vals = [float(v) for v in proc.stdout.strip().split(",")]
+    lines = proc.stdout.strip().splitlines()
+    assert lines[0].startswith("input,")
+    out_vals = [float(v) for v in lines[1].split(",")[1:]]
     expected = [min_lat, min_lon, max_lat, max_lon]
     for out_val, exp in zip(out_vals, expected):
         assert out_val == pytest.approx(round(exp, 4))
@@ -151,8 +158,8 @@ def test_cli_bbox_split_single():
     proc = _run_cli(["bbox", "IO83ri", "--split", "--digits", "4", "--csv"])
     assert proc.returncode == 0
     lines = proc.stdout.strip().splitlines()
-    assert len(lines) == 1
-    out_vals = [float(v) for v in lines[0].split(",")]
+    assert len(lines) == 2
+    out_vals = [float(v) for v in lines[1].split(",")[1:]]
     expected = list(to_bbox("IO83ri"))
     for out_val, exp in zip(out_vals, expected):
         assert out_val == pytest.approx(round(exp, 4))
@@ -188,7 +195,9 @@ def test_cli_size_output(sample_valid_locators):
     loc = sample_valid_locators(lengths=[6], seed=104)[0]
     proc = _run_cli(["size", loc, "--unit", "km", "--csv"])
     assert proc.returncode == 0
-    out = [float(v) for v in proc.stdout.strip().split(",")]
+    lines = proc.stdout.strip().splitlines()
+    assert lines[0] == "input,width,height"
+    out = [float(v) for v in lines[1].split(",")[1:]]
     assert len(out) == 2
     assert out[0] > 0.0
     assert out[1] > 0.0
@@ -240,8 +249,9 @@ def test_cli_center_batch_csv_file(tmp_path, sample_valid_locators):
     proc = _run_cli(["center", "--file", str(file_path), "--format", "csv", "--digits", "4"])
     assert proc.returncode == 0
     lines = proc.stdout.strip().splitlines()
-    assert len(lines) == 2
-    assert all("," in line for line in lines)
+    assert len(lines) == 3
+    assert lines[0] == "input,lat,lon"
+    assert all("," in line for line in lines[1:])
 
 
 def test_cli_from_latlon_batch_json_stdin():
@@ -250,7 +260,8 @@ def test_cli_from_latlon_batch_json_stdin():
     data = "53.365418,-2.574069\n52.069654,4.271870\n"
     proc = _run_cli(["from-latlon", "--stdin", "--format", "json"], stdin=data)
     assert proc.returncode == 0
-    assert orjson.loads(proc.stdout.strip()) == ["IO83ri", "JO22db"]
+    out = orjson.loads(proc.stdout.strip())
+    assert [item["output"] for item in out] == ["IO83ri", "JO22db"]
 
 
 def test_cli_format_truncate(sample_valid_locators):
@@ -370,7 +381,9 @@ def test_cli_azimuth_basic():
 
 
 def test_cli_azimuth_range():
-    parts = _run_cli_ok(["azimuth", "IO83ri", "IO84aa", "--range", "--digits", "4", "--csv"]).split(",")
+    lines = _run_cli_ok(["azimuth", "IO83ri", "IO84aa", "--range", "--digits", "4", "--csv"]).splitlines()
+    assert lines[0] == "bearing_deg,min_distance_km,max_distance_km"
+    parts = lines[1].split(",")
     assert len(parts) == 3
 
 
@@ -471,9 +484,9 @@ def test_cli_cover_line_batch_csv_stdin():
     data = "JJ00 JJ11 4\n"
     proc = _run_cli(["cover-line", "0.0,0.0", "1.0,1.0", "--precision", "4", "--stdin", "--format", "csv"], stdin=data)
     assert proc.returncode == 0
-    line = proc.stdout.strip()
-    assert line
-    assert "," in line
+    lines = proc.stdout.strip().splitlines()
+    assert lines[0] == "locator"
+    assert len(lines) > 1
 
 
 def test_cli_cover_circle_batch_json_stdin():
@@ -484,7 +497,7 @@ def test_cli_cover_circle_batch_json_stdin():
     assert proc.returncode == 0
     out = orjson.loads(proc.stdout.strip())
     assert isinstance(out, list)
-    assert out and isinstance(out[0], list)
+    assert out and isinstance(out[0], dict)
 
 
 def test_cli_cover_line_batch_json_stdin():
@@ -495,7 +508,7 @@ def test_cli_cover_line_batch_json_stdin():
     assert proc.returncode == 0
     out = orjson.loads(proc.stdout.strip())
     assert isinstance(out, list)
-    assert out and isinstance(out[0], list)
+    assert out and isinstance(out[0], dict)
 
 
 
@@ -503,7 +516,7 @@ def test_cli_bbox_split_command():
     proc = _run_cli(["bbox-split", "0", "170", "10", "-170", "--csv", "--digits", "4"])
     assert proc.returncode == 0
     lines = proc.stdout.strip().splitlines()
-    assert len(lines) == 2
+    assert len(lines) == 3
 
 
 def test_cli_bbox_split_list_json():
