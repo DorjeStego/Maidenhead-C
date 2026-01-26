@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-${1:-python}}"
 WITH_SLEEF_SIMD="${WITH_SLEEF_SIMD:-0}"
+EMIT_ASM="${EMIT_ASM:-0}"
 BUILD_DIR="${BUILD_DIR:-$ROOT/cmake-build-native-$("$PYTHON_BIN" - <<'PY'
 import sys
 print(f"{sys.version_info.major}{sys.version_info.minor}")
@@ -21,7 +22,7 @@ if [[ -z "$EXT_SUFFIX" ]]; then
   exit 1
 fi
 
-cmake -S "$ROOT" -B "$BUILD_DIR" -DPython_EXECUTABLE="$PYTHON_BIN" -DWITH_SLEEF_SIMD="$WITH_SLEEF_SIMD"
+cmake -S "$ROOT" -B "$BUILD_DIR" -DPython_EXECUTABLE="$PYTHON_BIN" -DWITH_SLEEF_SIMD="$WITH_SLEEF_SIMD" -DEMIT_ASM="$EMIT_ASM"
 cmake --build "$BUILD_DIR" --target _native
 
 SRC_SO="$BUILD_DIR/_native${EXT_SUFFIX}"

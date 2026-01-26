@@ -137,6 +137,8 @@ class build_ext(_build_ext):
         env["PYTHON_BIN"] = python_bin
         if sleef_available:
             env.setdefault("WITH_SLEEF_SIMD", "1")
+        if env.get("EMIT_ASM"):
+            env.setdefault("EMIT_ASM", env["EMIT_ASM"])
         subprocess.check_call([script], env=env, cwd=ROOT)
 
         # Stage the CMake-built extension into the build output directory.

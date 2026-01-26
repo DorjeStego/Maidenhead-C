@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(WITH_SLEEF_SIMD "Enable SIMD math backend via SLEEF" OFF)
+option(EMIT_ASM "Emit assembly alongside objects (-save-temps=obj)" OFF)
 
 # Build the CPython extension module for CLion builds.
 find_package(Python COMPONENTS Interpreter Development.Module Development REQUIRED)
@@ -60,6 +61,17 @@ target_include_directories(
 target_link_libraries(mh_cli PRIVATE)
 if(UNIX AND NOT APPLE)
     target_link_libraries(mh_cli PRIVATE m)
+endif()
+
+if(EMIT_ASM)
+    foreach(_tgt IN ITEMS _native mh_cli)
+        target_compile_options(
+            ${_tgt}
+            PRIVATE
+                $<$<C_COMPILER_ID:GNU,Clang>:-save-temps=obj>
+                $<$<CXX_COMPILER_ID:GNU,Clang>:-save-temps=obj>
+        )
+    endforeach()
 endif()
 
 if(WITH_SLEEF_SIMD)
