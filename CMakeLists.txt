@@ -13,7 +13,15 @@ option(EMIT_ASM "Emit assembly alongside objects (-save-temps=obj)" OFF)
 find_package(Python COMPONENTS Interpreter Development.Module Development REQUIRED)
 
 set(MAIDENHEAD_NATIVE_SOURCES
-    src/maidenhead/_native/maidenhead_native.c
+    src/maidenhead/_native/maidenhead_module.c
+    src/maidenhead/_native/maidenhead_errors.c
+    src/maidenhead/_native/maidenhead_parse.c
+    src/maidenhead/_native/maidenhead_pyutils.c
+    src/maidenhead/_native/maidenhead_math.c
+    src/maidenhead/_native/maidenhead_json.c
+    src/maidenhead/_native/maidenhead_geojson_py.c
+    src/maidenhead/_native/maidenhead_geo_py.c
+    src/maidenhead/_native/maidenhead_core_py.c
     src/maidenhead/_native/core.c
     src/maidenhead/_native/core_bulk.c
     src/maidenhead/_native/core_geo_helpers.c
