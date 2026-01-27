@@ -374,7 +374,7 @@ def _run_bulk_csv(tmp_path: Path, lines: list[str]) -> list[list[str]]:
     proc = _run_cli(args)
     assert proc.returncode == 0, proc.stderr
     reader = csv.reader(io.StringIO(proc.stdout))
-    return list(reader)
+    return [row for row in reader if row]
 
 
 def _parse_latlon(line: str) -> tuple[float, float]:
@@ -420,7 +420,7 @@ def _run_bulk_geojson_point_csv(tmp_path: Path, lines: list[str]) -> list[list[s
     proc = _run_cli(args)
     assert proc.returncode == 0, proc.stderr
     reader = csv.reader(io.StringIO(proc.stdout))
-    return list(reader)
+    return [row for row in reader if row]
 
 
 def test_bulk_from_latlon_csv_structure(tmp_path):
