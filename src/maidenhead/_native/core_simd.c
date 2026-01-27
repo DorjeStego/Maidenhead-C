@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "constants.h"
+#include "core_error.h"
 
 #if defined(__x86_64__) && defined(__GNUC__)
 #include <immintrin.h>
@@ -13,16 +14,6 @@
 #define MH_HAVE_NEON_SIMD 1
 #include <arm_neon.h>
 #endif
-
-static void mh_set_error(mh_error_context *err, mh_status code, const char *message) {
-    if (!err) {
-        return;
-    }
-    err->code = code;
-    err->message = message;
-    err->key = NULL;
-    err->value = NULL;
-}
 
 #if defined(__x86_64__) && defined(__GNUC__)
 __attribute__((target("avx")))

@@ -15,8 +15,15 @@ find_package(Python COMPONENTS Interpreter Development.Module Development REQUIR
 set(MAIDENHEAD_NATIVE_SOURCES
     src/maidenhead/_native/maidenhead_native.c
     src/maidenhead/_native/core.c
+    src/maidenhead/_native/core_bulk.c
+    src/maidenhead/_native/core_geo_helpers.c
+    src/maidenhead/_native/core_hierarchy.c
+    src/maidenhead/_native/core_locator.c
+    src/maidenhead/_native/core_metrics.c
     src/maidenhead/_native/core_simd.c
+    src/maidenhead/_native/core_spatial.c
     src/maidenhead/_native/core_utils.c
+    src/maidenhead/_native/core_validation.c
     src/maidenhead/_native/geo.c
     src/maidenhead/_native/coverage.c
     src/maidenhead/_native/geojson.c
@@ -56,8 +63,15 @@ add_executable(
     src/maidenhead/_native/cli_spatial_ops.c
     src/maidenhead/_native/cli_utils.c
     src/maidenhead/_native/core.c
+    src/maidenhead/_native/core_bulk.c
+    src/maidenhead/_native/core_geo_helpers.c
+    src/maidenhead/_native/core_hierarchy.c
+    src/maidenhead/_native/core_locator.c
+    src/maidenhead/_native/core_metrics.c
     src/maidenhead/_native/core_simd.c
+    src/maidenhead/_native/core_spatial.c
     src/maidenhead/_native/core_utils.c
+    src/maidenhead/_native/core_validation.c
     src/maidenhead/_native/geo.c
     src/maidenhead/_native/coverage.c
     src/maidenhead/_native/geojson.c
