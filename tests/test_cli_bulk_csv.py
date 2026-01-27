@@ -947,7 +947,7 @@ def _run_bulk_csv(
     proc = _run_cli(args)
     assert proc.returncode == 0, proc.stderr
     reader = csv.reader(io.StringIO(proc.stdout))
-    return list(reader)
+    return [row for row in reader if row]
 
 
 def _center_point_lines(locators: list[str]) -> list[str]:
