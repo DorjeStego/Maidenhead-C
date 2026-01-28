@@ -1,17 +1,8 @@
 #include "core.h"
 
-#include <ctype.h>
-#include <math.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
 #include "constants.h"
-#include "core_internal.h"
-#include "core_simd.h"
 #include "core_utils.h"
 #include "core_error.h"
-#include "geo.h"
 
 mh_status mh_split_bbox(
     mh_bbox bbox,
