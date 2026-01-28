@@ -38,11 +38,11 @@ int mh_validate_precision_value(int precision, mh_error_context *err) {
         mh_set_error(err, MH_ERR_PRECISION, "precision must be >= 2 characters");
         return 0;
     }
-    if (precision > 10) {
+    else if (precision > 10) {
         mh_set_error(err, MH_ERR_PRECISION, "precision must be <= 10 characters");
         return 0;
     }
-    if (precision % 2 != 0) {
+    else if (precision % 2 != 0) {
         mh_set_error(
             err,
             MH_ERR_PRECISION,
