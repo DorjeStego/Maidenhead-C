@@ -8,6 +8,7 @@
 #include "core_internal.h"
 #include "core_utils.h"
 #include "core_error.h"
+#include "core_validation.h"
 
 mh_status mh_to_bbox(const char *locator, mh_bbox *out, mh_error_context *err) {
     char norm[12];
@@ -35,8 +36,7 @@ mh_status mh_from_latlon(
         mh_set_error(err, MH_ERR_INTERNAL, "output is required");
         return MH_ERR_INTERNAL;
     }
-    if (!(precision % 2 == 0 && precision <= 10)) {
-        mh_set_error(err, MH_ERR_PRECISION, "precision must be one of 2, 4, 6, 8, 10");
+    if (!mh_validate_precision_value(precision, err)) {
         return MH_ERR_PRECISION;
     }
     if (!mh_validate_precision_value(precision, err)) {
