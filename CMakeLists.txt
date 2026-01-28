@@ -22,7 +22,6 @@ set(MAIDENHEAD_NATIVE_SOURCES
     src/maidenhead/_native/maidenhead_geojson_py.c
     src/maidenhead/_native/maidenhead_geo_py.c
     src/maidenhead/_native/maidenhead_core_py.c
-    src/maidenhead/_native/core.c
     src/maidenhead/_native/core_bulk.c
     src/maidenhead/_native/core_geo_helpers.c
     src/maidenhead/_native/core_hierarchy.c
@@ -70,7 +69,6 @@ add_executable(
     src/maidenhead/_native/cli_commands.c
     src/maidenhead/_native/cli_spatial_ops.c
     src/maidenhead/_native/cli_utils.c
-    src/maidenhead/_native/core.c
     src/maidenhead/_native/core_bulk.c
     src/maidenhead/_native/core_geo_helpers.c
     src/maidenhead/_native/core_hierarchy.c

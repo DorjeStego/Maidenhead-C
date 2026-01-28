@@ -46,6 +46,15 @@ mh_status mh_to_bbox_split(
     return mh_split_bbox_list(bbox, parts, parts_len, err);
 }
 
+mh_status mh_split_bbox(
+    mh_bbox bbox,
+    mh_bbox *parts,
+    size_t *parts_len,
+    mh_error_context *err
+) {
+    return mh_split_bbox_list(bbox, parts, parts_len, err);
+}
+
 mh_status mh_split_bbox_list(
     mh_bbox bbox,
     mh_bbox *parts,
