@@ -46,7 +46,7 @@ int mh_validate_precision_value(int precision, mh_error_context *err) {
         mh_set_error(
             err,
             MH_ERR_PRECISION,
-            "precision must be an even number of characters (2, 4, 6, ...)"
+            "precision must be an even number of characters (2, 4, 6, 8 or 10)"
         );
         return 0;
     }
