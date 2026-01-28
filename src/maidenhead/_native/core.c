@@ -643,7 +643,7 @@ mh_status mh_from_latlon(
         mh_set_error(err, MH_ERR_INTERNAL, "output is required");
         return MH_ERR_INTERNAL;
     }
-    if (!(precision == 2 || precision == 4 || precision == 6 || precision == 8 || precision == 10)) {
+    if (!(precision % 2 == 0 && precision <= 10)) {
         mh_set_error(err, MH_ERR_PRECISION, "precision must be one of 2, 4, 6, 8, 10");
         return MH_ERR_PRECISION;
     }
